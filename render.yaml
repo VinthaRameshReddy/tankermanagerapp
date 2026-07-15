@@ -35,15 +35,15 @@ services:
         value: openrouteservice
       - key: ORS_API_KEY
         sync: false
-      # India SMS: use fast2sms (recommended) or msg91
-      - key: SMS_ENABLED
-        value: "false"
+      # Fast2SMS — same key names as openplot-api (copy values after Approve)
+      - key: FAST2SMS_ENABLED
+        value: "true"
+      - key: FAST2SMS_API_KEY
+        sync: false
+      - key: FAST2SMS_SENDER_ID
+        value: TANKER
       - key: SMS_PROVIDER
         value: fast2sms
-      - key: SMS_API_KEY
-        sync: false
-      - key: SMS_SENDER_ID
-        value: TANKER
       - key: CORS_ORIGINS
         value: "*"
 

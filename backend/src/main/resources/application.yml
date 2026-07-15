@@ -24,10 +24,11 @@ app:
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
   public-base-url: ${APP_PUBLIC_BASE_URL:}
   sms:
-    enabled: ${SMS_ENABLED:false}
-    provider: ${SMS_PROVIDER:console}
-    api-key: ${SMS_API_KEY:}
-    sender-id: ${SMS_SENDER_ID:TANKER}
+    # Accepts same names as openplot: FAST2SMS_* (or SMS_*)
+    enabled: ${SMS_ENABLED:${FAST2SMS_ENABLED:false}}
+    provider: ${SMS_PROVIDER:fast2sms}
+    api-key: ${SMS_API_KEY:${FAST2SMS_API_KEY:}}
+    sender-id: ${SMS_SENDER_ID:${FAST2SMS_SENDER_ID:TANKER}}
   maps:
     provider: ${MAPS_PROVIDER:openrouteservice}
     api-key: ${ORS_API_KEY:}

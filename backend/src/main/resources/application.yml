@@ -29,7 +29,9 @@ app:
     api-key: ${SMS_API_KEY:}
     sender-id: ${SMS_SENDER_ID:TANKER}
   maps:
-    api-key: ${GOOGLE_MAPS_API_KEY:}
+    provider: ${MAPS_PROVIDER:openrouteservice}
+    api-key: ${ORS_API_KEY:}
+    ors-base-url: ${ORS_BASE_URL:https://api.openrouteservice.org}
   cors:
     allowed-origins: ${CORS_ORIGINS:*}
 

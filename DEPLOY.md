@@ -30,12 +30,19 @@ Suggested Render env:
 - `SMS_PROVIDER=fast2sms`
 - `SMS_API_KEY=<your key>`
 
-## Google Maps
-Set on Render (do **not** commit the key):
-- `GOOGLE_MAPS_API_KEY=<your key>`
-Enable: Maps SDK for Android, Directions API, Geocoding (optional).
+## Routing / ETA — OpenRouteService (free, no Google billing)
 
-## Render deploy
+1. Sign up: https://openrouteservice.org/dev/#/signup  
+2. Dashboard → copy **API key**  
+3. On Render → Environment set:
+   - `MAPS_PROVIDER=openrouteservice`
+   - `ORS_API_KEY=<your key>`
+4. Redeploy  
+
+Without the key, the API still works using distance-based ETA.  
+Driver GPS tracking does **not** need this key.
+
+## SMS recommendation (India)
 1. https://dashboard.render.com → New → Blueprint  
 2. Connect `VinthaRameshReddy/tankermanagerapp` (uses root `render.yaml`)  
 3. After deploy, set:

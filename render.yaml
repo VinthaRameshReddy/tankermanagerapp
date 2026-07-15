@@ -30,7 +30,10 @@ services:
       # Public API URL after deploy, e.g. https://tanker-manager-api.onrender.com
       - key: APP_PUBLIC_BASE_URL
         sync: false
-      - key: GOOGLE_MAPS_API_KEY
+      # Free OpenRouteService key: https://openrouteservice.org/dev/#/signup
+      - key: MAPS_PROVIDER
+        value: openrouteservice
+      - key: ORS_API_KEY
         sync: false
       # India SMS: use fast2sms (recommended) or msg91
       - key: SMS_ENABLED

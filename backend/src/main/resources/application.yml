@@ -70,14 +70,8 @@ spring:
   config:
     activate:
       on-profile: prod
-  datasource:
-    # Prefer DATABASE_URL; otherwise ProdDataSourceConfig builds from DATABASE_HOST_*
-    url: ${DATABASE_URL:}
-    username: ${DB_USERNAME:${DATABASE_USER:}}
-    password: ${DB_PASSWORD:${DATABASE_PASSWORD:}}
-    driver-class-name: org.postgresql.Driver
-    hikari:
-      maximum-pool-size: 5
+  # Datasource is fully configured in ProdDataSourceConfig from env vars
+  # (DATABASE_HOST / DATABASE_URL). Do not force placeholder URL here.
   jpa:
     show-sql: false
     hibernate:

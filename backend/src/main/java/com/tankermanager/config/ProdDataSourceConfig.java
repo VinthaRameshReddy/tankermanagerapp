@@ -1,7 +1,8 @@
 package com.tankermanager.config;
 
-import org.springframework.boot.autoconfigure.jdbc.DataSourceProperties;
-import org.springframework.boot.context.properties.ConfigurationProperties;
+import com.zaxxer.hikari.HikariDataSource;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Primary;
@@ -11,67 +12,79 @@ import org.springframework.core.env.Environment;
 import javax.sql.DataSource;
 
 /**
- * Production datasource for Render:
- * - Prefer DATABASE_URL
- * - Or DATABASE_HOST / DATABASE_NAME / DATABASE_USER / DATABASE_PASSWORD (buffalo / openplot style)
- * Converts postgres://… → jdbc:postgresql://… and appends sslmode=require.
+ * Builds the prod DataSource from Render env vars.
+ * Supports:
+ * - DATABASE_URL (postgres:// or jdbc:postgresql://)
+ * - DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD (buffalo / openplot style)
  */
 @Configuration
 @Profile("prod")
 public class ProdDataSourceConfig {
 
+    private static final Logger log = LoggerFactory.getLogger(ProdDataSourceConfig.class);
+
     @Bean
     @Primary
-    @ConfigurationProperties("spring.datasource")
-    public DataSourceProperties dataSourceProperties(Environment env) {
-        DataSourceProperties props = new DataSourceProperties();
+    public DataSource dataSource(Environment env) {
+        String jdbcUrl = resolveJdbcUrl(env);
+        String user = firstNonBlank(
+                env.getProperty("DATABASE_USER"),
+                env.getProperty("DB_USERNAME"),
+                env.getProperty("spring.datasource.username"));
+        String pass = firstNonBlank(
+                env.getProperty("DATABASE_PASSWORD"),
+                env.getProperty("DB_PASSWORD"),
+                env.getProperty("spring.datasource.password"));
 
-        String url = firstNonBlank(env.getProperty("DATABASE_URL"), env.getProperty("spring.datasource.url"));
+        // If credentials are embedded in DATABASE_URL, user/pass may be null — that's OK
+        if (isBlank(jdbcUrl)) {
+            throw new IllegalStateException(
+                    "Database URL missing. On Render set either DATABASE_URL, or "
+                            + "DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD "
+                            + "(same values as openplot-api / buffalo_db).");
+        }
+
+        log.info("Prod datasource jdbcUrl={} user={}", maskUrl(jdbcUrl), user);
+
+        HikariDataSource ds = new HikariDataSource();
+        ds.setJdbcUrl(jdbcUrl);
+        if (!isBlank(user)) {
+            ds.setUsername(user);
+        }
+        if (!isBlank(pass)) {
+            ds.setPassword(pass);
+        }
+        ds.setDriverClassName("org.postgresql.Driver");
+        ds.setMaximumPoolSize(5);
+        ds.setConnectionTimeout(30000);
+        return ds;
+    }
+
+    private static String resolveJdbcUrl(Environment env) {
+        String url = firstNonBlank(
+                env.getProperty("DATABASE_URL"),
+                env.getProperty("spring.datasource.url"));
+
         if (isBlank(url)) {
-            String host = env.getProperty("DATABASE_HOST");
-            String port = env.getProperty("DATABASE_PORT", "5432");
-            String name = env.getProperty("DATABASE_NAME");
+            String host = firstNonBlank(env.getProperty("DATABASE_HOST"));
+            String port = firstNonBlank(env.getProperty("DATABASE_PORT"), "5432");
+            String name = firstNonBlank(env.getProperty("DATABASE_NAME"));
             if (!isBlank(host) && !isBlank(name)) {
                 url = "jdbc:postgresql://" + host + ":" + port + "/" + name;
             }
         }
 
-        if (!isBlank(url)) {
-            props.setUrl(withSsl(toJdbc(url)));
+        if (isBlank(url)) {
+            return null;
         }
-
-        String user = firstNonBlank(
-                env.getProperty("DB_USERNAME"),
-                env.getProperty("DATABASE_USER"),
-                env.getProperty("spring.datasource.username"));
-        String pass = firstNonBlank(
-                env.getProperty("DB_PASSWORD"),
-                env.getProperty("DATABASE_PASSWORD"),
-                env.getProperty("spring.datasource.password"));
-        if (!isBlank(user)) {
-            props.setUsername(user);
-        }
-        if (!isBlank(pass)) {
-            props.setPassword(pass);
-        }
-        props.setDriverClassName("org.postgresql.Driver");
-        return props;
-    }
-
-    @Bean
-    @Primary
-    public DataSource dataSource(DataSourceProperties properties) {
-        if (isBlank(properties.getUrl())) {
-            throw new IllegalStateException(
-                    "Database URL missing. Set DATABASE_URL or DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD");
-        }
-        return properties.initializeDataSourceBuilder().build();
+        return withSsl(toJdbc(url.trim()));
     }
 
     static String toJdbc(String url) {
         if (url.startsWith("jdbc:")) {
             return url;
         }
+        // postgres://user:pass@host:port/db → jdbc:postgresql://user:pass@host:port/db
         if (url.startsWith("postgres://")) {
             return "jdbc:postgresql://" + url.substring("postgres://".length());
         }
@@ -86,6 +99,10 @@ public class ProdDataSourceConfig {
             return jdbcUrl;
         }
         return jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "sslmode=require";
+    }
+
+    private static String maskUrl(String url) {
+        return url.replaceAll("://([^:/@]+):([^@/]+)@", "://$1:***@");
     }
 
     private static boolean isBlank(String s) {

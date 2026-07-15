@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#0B5F5C</color>
+    <style name="Theme.TankerManager" parent="android:Theme.Material.Light.NoActionBar">
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">#F3FBFB</item>
+        <item name="android:windowBackground">#F3FBFB</item>
+    </style>
+</resources>

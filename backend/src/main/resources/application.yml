@@ -1,0 +1,78 @@
+server:
+  port: ${PORT:8080}
+
+spring:
+  application:
+    name: tanker-manager
+  profiles:
+    active: ${SPRING_PROFILES_ACTIVE:local}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        format_sql: true
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+    default-property-inclusion: non_null
+
+app:
+  jwt:
+    secret: ${JWT_SECRET:Tank3rM4nagerSecr3tKeyMustBeAtLeast256BitsLongForHS256Algorithm!!}
+    expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  sms:
+    enabled: ${SMS_ENABLED:false}
+    provider: ${SMS_PROVIDER:console}
+    api-key: ${SMS_API_KEY:}
+    sender-id: ${SMS_SENDER_ID:TANKER}
+  maps:
+    api-key: ${GOOGLE_MAPS_API_KEY:}
+  cors:
+    allowed-origins: ${CORS_ORIGINS:*}
+
+springdoc:
+  api-docs:
+    path: /api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+
+logging:
+  level:
+    com.tankermanager: INFO
+    org.springframework.security: WARN
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:h2:mem:tankermanager;DB_CLOSE_DELAY=-1;MODE=PostgreSQL
+    driver-class-name: org.h2.Driver
+    username: sa
+    password:
+  h2:
+    console:
+      enabled: true
+      path: /h2-console
+  jpa:
+    database-platform: org.hibernate.dialect.H2Dialect
+    show-sql: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: prod
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
+    show-sql: false
+    hibernate:
+      ddl-auto: update

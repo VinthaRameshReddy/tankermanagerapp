@@ -30,6 +30,24 @@ Suggested Render env:
 - `SMS_PROVIDER=fast2sms`
 - `SMS_API_KEY=<your key>`
 
+## Render DB (free tier)
+
+Render allows **only one free Postgres**. This project reuses your existing **buffalo_db**
+(from openplot-api). Do **not** create `tanker-manager-db`.
+
+Copy from openplot-api → Environment into tanker-manager-api:
+
+| Key | From openplot |
+|-----|----------------|
+| `DATABASE_HOST` | same |
+| `DATABASE_PORT` | `5432` |
+| `DATABASE_NAME` | same (`buffalo_db`) |
+| `DATABASE_USER` | same |
+| `DATABASE_PASSWORD` | same |
+
+Tanker tables (`operators`, `trips`, …) are created automatically via JPA (`ddl-auto=update`).
+Keep them in the same DB as openplot — different table names, usually fine.
+
 ## Routing / ETA — OpenRouteService (free, no Google billing)
 
 1. Sign up: https://openrouteservice.org/dev/#/signup  

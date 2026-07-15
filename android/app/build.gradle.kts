@@ -14,8 +14,8 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
-        // Emulator → host machine API. For real device, change to your PC LAN IP.
-        buildConfigField("String", "BASE_URL", "\"http://10.0.2.2:8080/\"")
+        // Emulator local API. Real phone / Render:
+        buildConfigField("String", "BASE_URL", "\"https://tanker-manager-api-4nvy.onrender.com/\"")
     }
 
     buildTypes {

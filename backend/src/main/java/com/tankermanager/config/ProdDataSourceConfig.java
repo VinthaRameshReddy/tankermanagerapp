@@ -12,9 +12,9 @@ import javax.sql.DataSource;
 
 /**
  * Production datasource for Render:
- * - Prefer DATABASE_URL (Blueprint postgres connection string)
- * - Or DATABASE_HOST / DATABASE_NAME / DATABASE_USER / DATABASE_PASSWORD (openplot-style)
- * Converts postgres://… → jdbc:postgresql://…
+ * - Prefer DATABASE_URL
+ * - Or DATABASE_HOST / DATABASE_NAME / DATABASE_USER / DATABASE_PASSWORD (buffalo / openplot style)
+ * Converts postgres://… → jdbc:postgresql://… and appends sslmode=require.
  */
 @Configuration
 @Profile("prod")
@@ -24,32 +24,34 @@ public class ProdDataSourceConfig {
     @Primary
     @ConfigurationProperties("spring.datasource")
     public DataSourceProperties dataSourceProperties(Environment env) {
-        DataSourceProperties props = new DataSourceProperties() {
-            @Override
-            public void setUrl(String url) {
-                super.setUrl(toJdbc(url));
-            }
-        };
+        DataSourceProperties props = new DataSourceProperties();
 
-        String url = env.getProperty("DATABASE_URL");
-        if (url == null || url.isBlank()) {
+        String url = firstNonBlank(env.getProperty("DATABASE_URL"), env.getProperty("spring.datasource.url"));
+        if (isBlank(url)) {
             String host = env.getProperty("DATABASE_HOST");
             String port = env.getProperty("DATABASE_PORT", "5432");
             String name = env.getProperty("DATABASE_NAME");
-            if (host != null && name != null) {
+            if (!isBlank(host) && !isBlank(name)) {
                 url = "jdbc:postgresql://" + host + ":" + port + "/" + name;
             }
         }
-        if (url != null && !url.isBlank()) {
-            props.setUrl(toJdbc(url));
+
+        if (!isBlank(url)) {
+            props.setUrl(withSsl(toJdbc(url)));
         }
 
-        String user = env.getProperty("DB_USERNAME", env.getProperty("DATABASE_USER"));
-        String pass = env.getProperty("DB_PASSWORD", env.getProperty("DATABASE_PASSWORD"));
-        if (user != null) {
+        String user = firstNonBlank(
+                env.getProperty("DB_USERNAME"),
+                env.getProperty("DATABASE_USER"),
+                env.getProperty("spring.datasource.username"));
+        String pass = firstNonBlank(
+                env.getProperty("DB_PASSWORD"),
+                env.getProperty("DATABASE_PASSWORD"),
+                env.getProperty("spring.datasource.password"));
+        if (!isBlank(user)) {
             props.setUsername(user);
         }
-        if (pass != null) {
+        if (!isBlank(pass)) {
             props.setPassword(pass);
         }
         props.setDriverClassName("org.postgresql.Driver");
@@ -59,13 +61,14 @@ public class ProdDataSourceConfig {
     @Bean
     @Primary
     public DataSource dataSource(DataSourceProperties properties) {
+        if (isBlank(properties.getUrl())) {
+            throw new IllegalStateException(
+                    "Database URL missing. Set DATABASE_URL or DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD");
+        }
         return properties.initializeDataSourceBuilder().build();
     }
 
     static String toJdbc(String url) {
-        if (url == null) {
-            return null;
-        }
         if (url.startsWith("jdbc:")) {
             return url;
         }
@@ -76,5 +79,28 @@ public class ProdDataSourceConfig {
             return "jdbc:postgresql://" + url.substring("postgresql://".length());
         }
         return url;
+    }
+
+    static String withSsl(String jdbcUrl) {
+        if (jdbcUrl.contains("sslmode=")) {
+            return jdbcUrl;
+        }
+        return jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "sslmode=require";
+    }
+
+    private static boolean isBlank(String s) {
+        return s == null || s.isBlank();
+    }
+
+    private static String firstNonBlank(String... values) {
+        if (values == null) {
+            return null;
+        }
+        for (String v : values) {
+            if (!isBlank(v)) {
+                return v;
+            }
+        }
+        return null;
     }
 }

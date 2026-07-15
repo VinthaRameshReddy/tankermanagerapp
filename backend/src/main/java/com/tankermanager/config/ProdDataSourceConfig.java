@@ -70,6 +70,8 @@ public class ProdDataSourceConfig {
             String port = firstNonBlank(env.getProperty("DATABASE_PORT"), "5432");
             String name = firstNonBlank(env.getProperty("DATABASE_NAME"));
             if (!isBlank(host) && !isBlank(name)) {
+                host = toRenderInternalHost(host);
+                // Internal Render Postgres uses host only (default 5432)
                 url = "jdbc:postgresql://" + host + ":" + port + "/" + name;
             }
         }
@@ -77,7 +79,72 @@ public class ProdDataSourceConfig {
         if (isBlank(url)) {
             return null;
         }
-        return withSsl(toJdbc(url.trim()));
+        return withSsl(toJdbc(toRenderInternalJdbc(url.trim())));
+    }
+
+    /**
+     * Render free Postgres: from another Render service, prefer the internal hostname
+     * dpg-xxxxx-a  instead of  dpg-xxxxx-a.singapore-postgres.render.com
+     * External host often fails auth with EOFException between Render services.
+     */
+    static String toRenderInternalHost(String host) {
+        if (host == null) {
+            return null;
+        }
+        // dpg-xxx-a.oregon-postgres.render.com → dpg-xxx-a
+        int idx = host.indexOf(".postgres.render.com");
+        if (idx > 0) {
+            // also matches region-postgres.render.com after stripping "-region"
+            String before = host.substring(0, idx);
+            int lastDot = before.lastIndexOf('.');
+            if (lastDot > 0) {
+                return before.substring(0, lastDot); // shouldn't happen
+            }
+        }
+        // Pattern: dpg-....-a.singapore-postgres.render.com
+        if (host.contains("-postgres.render.com")) {
+            int dot = host.indexOf('.');
+            if (dot > 0) {
+                return host.substring(0, dot);
+            }
+        }
+        return host;
+    }
+
+    static String toRenderInternalJdbc(String jdbcUrl) {
+        // jdbc:postgresql://dpg-xxx-a.singapore-postgres.render.com:5432/db
+        // → jdbc:postgresql://dpg-xxx-a:5432/db
+        try {
+            String withoutScheme = jdbcUrl;
+            String prefix = "";
+            if (jdbcUrl.startsWith("jdbc:postgresql://")) {
+                prefix = "jdbc:postgresql://";
+                withoutScheme = jdbcUrl.substring(prefix.length());
+            } else if (jdbcUrl.startsWith("jdbc:postgres://")) {
+                prefix = "jdbc:postgresql://";
+                withoutScheme = jdbcUrl.substring("jdbc:postgres://".length());
+            } else {
+                return jdbcUrl;
+            }
+            // strip credentials if present user:pass@host
+            String creds = "";
+            int at = withoutScheme.lastIndexOf('@');
+            String hostPart = withoutScheme;
+            if (at >= 0) {
+                creds = withoutScheme.substring(0, at + 1);
+                hostPart = withoutScheme.substring(at + 1);
+            }
+            int slash = hostPart.indexOf('/');
+            String path = slash >= 0 ? hostPart.substring(slash) : "";
+            String hostPort = slash >= 0 ? hostPart.substring(0, slash) : hostPart;
+            int colon = hostPort.indexOf(':');
+            String host = colon >= 0 ? hostPort.substring(0, colon) : hostPort;
+            String port = colon >= 0 ? hostPort.substring(colon) : ":5432";
+            host = toRenderInternalHost(host);
+            return prefix + creds + host + port + path;
+        } catch (Exception e) {
+            return jdbcUrl;
+        }
     }
 
     static String toJdbc(String url) {

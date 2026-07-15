@@ -74,6 +74,7 @@ spring:
   # (DATABASE_HOST / DATABASE_URL). Do not force placeholder URL here.
   jpa:
     show-sql: false
+    database-platform: org.hibernate.dialect.PostgreSQLDialect
     hibernate:
       ddl-auto: update
     properties:

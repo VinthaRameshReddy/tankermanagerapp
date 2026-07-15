@@ -10,12 +10,13 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.core.env.Environment;
 
 import javax.sql.DataSource;
+import java.net.URI;
+import java.net.URISyntaxException;
 
 /**
  * Builds the prod DataSource from Render env vars.
- * Supports:
- * - DATABASE_URL (postgres:// or jdbc:postgresql://)
- * - DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD (buffalo / openplot style)
+ * Parses postgres://user:pass@host/db into jdbc URL + separate user/password
+ * (PG JDBC does not accept credentials embedded in the jdbc URL).
  */
 @Configuration
 @Profile("prod")
@@ -26,82 +27,107 @@ public class ProdDataSourceConfig {
     @Bean
     @Primary
     public DataSource dataSource(Environment env) {
-        String jdbcUrl = resolveJdbcUrl(env);
-        String user = firstNonBlank(
-                env.getProperty("DATABASE_USER"),
-                env.getProperty("DB_USERNAME"),
-                env.getProperty("spring.datasource.username"));
-        String pass = firstNonBlank(
-                env.getProperty("DATABASE_PASSWORD"),
-                env.getProperty("DB_PASSWORD"),
-                env.getProperty("spring.datasource.password"));
-
-        // If credentials are embedded in DATABASE_URL, user/pass may be null — that's OK
-        if (isBlank(jdbcUrl)) {
-            throw new IllegalStateException(
-                    "Database URL missing. On Render set either DATABASE_URL, or "
-                            + "DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD "
-                            + "(same values as openplot-api / buffalo_db).");
-        }
-
-        log.info("Prod datasource jdbcUrl={} user={}", maskUrl(jdbcUrl), user);
+        DbParts parts = resolve(env);
 
         HikariDataSource ds = new HikariDataSource();
-        ds.setJdbcUrl(jdbcUrl);
-        if (!isBlank(user)) {
-            ds.setUsername(user);
-        }
-        if (!isBlank(pass)) {
-            ds.setPassword(pass);
-        }
+        ds.setJdbcUrl(parts.jdbcUrl);
+        ds.setUsername(parts.username);
+        ds.setPassword(parts.password);
         ds.setDriverClassName("org.postgresql.Driver");
         ds.setMaximumPoolSize(5);
         ds.setConnectionTimeout(30000);
+
+        log.info("Prod datasource jdbcUrl={} user={}", parts.jdbcUrl, parts.username);
         return ds;
     }
 
-    private static String resolveJdbcUrl(Environment env) {
-        String url = firstNonBlank(
-                env.getProperty("DATABASE_URL"),
-                env.getProperty("spring.datasource.url"));
+    private static DbParts resolve(Environment env) {
+        String rawUrl = firstNonBlank(env.getProperty("DATABASE_URL"), env.getProperty("spring.datasource.url"));
+        String user = firstNonBlank(env.getProperty("DATABASE_USER"), env.getProperty("DB_USERNAME"));
+        String pass = firstNonBlank(env.getProperty("DATABASE_PASSWORD"), env.getProperty("DB_PASSWORD"));
 
-        if (isBlank(url)) {
-            String host = firstNonBlank(env.getProperty("DATABASE_HOST"));
-            String port = firstNonBlank(env.getProperty("DATABASE_PORT"), "5432");
-            String name = firstNonBlank(env.getProperty("DATABASE_NAME"));
-            if (!isBlank(host) && !isBlank(name)) {
-                host = toRenderInternalHost(host);
-                // Internal Render Postgres uses host only (default 5432)
-                url = "jdbc:postgresql://" + host + ":" + port + "/" + name;
+        if (!isBlank(rawUrl)) {
+            DbParts fromUrl = parseDatabaseUrl(rawUrl);
+            // Env USER/PASSWORD override URL if both set
+            if (!isBlank(user)) {
+                fromUrl.username = user;
             }
+            if (!isBlank(pass)) {
+                fromUrl.password = pass;
+            }
+            return fromUrl;
         }
 
-        if (isBlank(url)) {
-            return null;
+        String host = firstNonBlank(env.getProperty("DATABASE_HOST"));
+        String port = firstNonBlank(env.getProperty("DATABASE_PORT"), "5432");
+        String name = firstNonBlank(env.getProperty("DATABASE_NAME"));
+        if (isBlank(host) || isBlank(name) || isBlank(user) || isBlank(pass)) {
+            throw new IllegalStateException(
+                    "Set DATABASE_URL (Internal URL from Render) OR "
+                            + "DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD");
         }
-        return withSsl(toJdbc(toRenderInternalJdbc(url.trim())));
+        host = toRenderInternalHost(host);
+        String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + name);
+        return new DbParts(jdbc, user, pass);
     }
 
     /**
-     * Render free Postgres: from another Render service, prefer the internal hostname
-     * dpg-xxxxx-a  instead of  dpg-xxxxx-a.singapore-postgres.render.com
-     * External host often fails auth with EOFException between Render services.
+     * Accepts:
+     * - postgresql://user:pass@host/db
+     * - postgres://user:pass@host:5432/db
+     * - jdbc:postgresql://host:5432/db
      */
+    static DbParts parseDatabaseUrl(String raw) {
+        String value = raw.trim();
+        if (value.startsWith("jdbc:postgresql://") && !value.contains("@")) {
+            // Already a clean JDBC URL without credentials
+            return new DbParts(withSsl(value), null, null);
+        }
+
+        // Normalize to URI-parseable form
+        String normalized = value;
+        if (normalized.startsWith("jdbc:postgresql://")) {
+            normalized = "postgresql://" + normalized.substring("jdbc:postgresql://".length());
+        } else if (normalized.startsWith("jdbc:postgres://")) {
+            normalized = "postgres://" + normalized.substring("jdbc:postgres://".length());
+        }
+
+        try {
+            URI uri = new URI(normalized);
+            String host = toRenderInternalHost(uri.getHost());
+            int port = uri.getPort() > 0 ? uri.getPort() : 5432;
+            String path = uri.getPath();
+            String db = (path != null && path.startsWith("/")) ? path.substring(1) : path;
+            // strip query from db name if present
+            if (db != null && db.contains("?")) {
+                db = db.substring(0, db.indexOf('?'));
+            }
+
+            String username = null;
+            String password = null;
+            String userInfo = uri.getUserInfo();
+            if (userInfo != null) {
+                int colon = userInfo.indexOf(':');
+                if (colon >= 0) {
+                    username = userInfo.substring(0, colon);
+                    password = userInfo.substring(colon + 1);
+                } else {
+                    username = userInfo;
+                }
+            }
+
+            String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + db);
+            return new DbParts(jdbc, username, password);
+        } catch (URISyntaxException e) {
+            throw new IllegalStateException("Invalid DATABASE_URL: " + e.getMessage(), e);
+        }
+    }
+
     static String toRenderInternalHost(String host) {
         if (host == null) {
             return null;
         }
-        // dpg-xxx-a.oregon-postgres.render.com → dpg-xxx-a
-        int idx = host.indexOf(".postgres.render.com");
-        if (idx > 0) {
-            // also matches region-postgres.render.com after stripping "-region"
-            String before = host.substring(0, idx);
-            int lastDot = before.lastIndexOf('.');
-            if (lastDot > 0) {
-                return before.substring(0, lastDot); // shouldn't happen
-            }
-        }
-        // Pattern: dpg-....-a.singapore-postgres.render.com
+        // dpg-xxx-a.singapore-postgres.render.com → dpg-xxx-a
         if (host.contains("-postgres.render.com")) {
             int dot = host.indexOf('.');
             if (dot > 0) {
@@ -111,65 +137,11 @@ public class ProdDataSourceConfig {
         return host;
     }
 
-    static String toRenderInternalJdbc(String jdbcUrl) {
-        // jdbc:postgresql://dpg-xxx-a.singapore-postgres.render.com:5432/db
-        // → jdbc:postgresql://dpg-xxx-a:5432/db
-        try {
-            String withoutScheme = jdbcUrl;
-            String prefix = "";
-            if (jdbcUrl.startsWith("jdbc:postgresql://")) {
-                prefix = "jdbc:postgresql://";
-                withoutScheme = jdbcUrl.substring(prefix.length());
-            } else if (jdbcUrl.startsWith("jdbc:postgres://")) {
-                prefix = "jdbc:postgresql://";
-                withoutScheme = jdbcUrl.substring("jdbc:postgres://".length());
-            } else {
-                return jdbcUrl;
-            }
-            // strip credentials if present user:pass@host
-            String creds = "";
-            int at = withoutScheme.lastIndexOf('@');
-            String hostPart = withoutScheme;
-            if (at >= 0) {
-                creds = withoutScheme.substring(0, at + 1);
-                hostPart = withoutScheme.substring(at + 1);
-            }
-            int slash = hostPart.indexOf('/');
-            String path = slash >= 0 ? hostPart.substring(slash) : "";
-            String hostPort = slash >= 0 ? hostPart.substring(0, slash) : hostPart;
-            int colon = hostPort.indexOf(':');
-            String host = colon >= 0 ? hostPort.substring(0, colon) : hostPort;
-            String port = colon >= 0 ? hostPort.substring(colon) : ":5432";
-            host = toRenderInternalHost(host);
-            return prefix + creds + host + port + path;
-        } catch (Exception e) {
-            return jdbcUrl;
-        }
-    }
-
-    static String toJdbc(String url) {
-        if (url.startsWith("jdbc:")) {
-            return url;
-        }
-        // postgres://user:pass@host:port/db → jdbc:postgresql://user:pass@host:port/db
-        if (url.startsWith("postgres://")) {
-            return "jdbc:postgresql://" + url.substring("postgres://".length());
-        }
-        if (url.startsWith("postgresql://")) {
-            return "jdbc:postgresql://" + url.substring("postgresql://".length());
-        }
-        return url;
-    }
-
     static String withSsl(String jdbcUrl) {
         if (jdbcUrl.contains("sslmode=")) {
             return jdbcUrl;
         }
         return jdbcUrl + (jdbcUrl.contains("?") ? "&" : "?") + "sslmode=require";
-    }
-
-    private static String maskUrl(String url) {
-        return url.replaceAll("://([^:/@]+):([^@/]+)@", "://$1:***@");
     }
 
     private static boolean isBlank(String s) {
@@ -186,5 +158,17 @@ public class ProdDataSourceConfig {
             }
         }
         return null;
+    }
+
+    static final class DbParts {
+        final String jdbcUrl;
+        String username;
+        String password;
+
+        DbParts(String jdbcUrl, String username, String password) {
+            this.jdbcUrl = jdbcUrl;
+            this.username = username;
+            this.password = password;
+        }
     }
 }

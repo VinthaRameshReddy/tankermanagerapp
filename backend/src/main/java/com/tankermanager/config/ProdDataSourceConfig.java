@@ -17,6 +17,9 @@ import java.net.URISyntaxException;
  * Builds the prod DataSource from Render env vars.
  * Parses postgres://user:pass@host/db into jdbc URL + separate user/password
  * (PG JDBC does not accept credentials embedded in the jdbc URL).
+ *
+ * Prefer Render External Database URL when the web service and Postgres are not
+ * in the same region (short internal hosts like dpg-xxx-a will not resolve).
  */
 @Configuration
 @Profile("prod")
@@ -35,7 +38,7 @@ public class ProdDataSourceConfig {
         ds.setPassword(parts.password);
         ds.setDriverClassName("org.postgresql.Driver");
         ds.setMaximumPoolSize(5);
-        ds.setConnectionTimeout(30000);
+        ds.setConnectionTimeout(60000);
 
         log.info("Prod datasource jdbcUrl={} user={}", parts.jdbcUrl, parts.username);
         return ds;
@@ -47,8 +50,7 @@ public class ProdDataSourceConfig {
         String pass = firstNonBlank(env.getProperty("DATABASE_PASSWORD"), env.getProperty("DB_PASSWORD"));
 
         if (!isBlank(rawUrl)) {
-            DbParts fromUrl = parseDatabaseUrl(rawUrl);
-            // Env USER/PASSWORD override URL if both set
+            DbParts fromUrl = parseDatabaseUrl(rawUrl, env);
             if (!isBlank(user)) {
                 fromUrl.username = user;
             }
@@ -63,10 +65,10 @@ public class ProdDataSourceConfig {
         String name = firstNonBlank(env.getProperty("DATABASE_NAME"));
         if (isBlank(host) || isBlank(name) || isBlank(user) || isBlank(pass)) {
             throw new IllegalStateException(
-                    "Set DATABASE_URL (Internal URL from Render) OR "
+                    "Set DATABASE_URL (Render External Database URL) OR "
                             + "DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD");
         }
-        host = toRenderInternalHost(host);
+        host = expandShortRenderHost(host, env);
         String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + name);
         return new DbParts(jdbc, user, pass);
     }
@@ -77,14 +79,12 @@ public class ProdDataSourceConfig {
      * - postgres://user:pass@host:5432/db
      * - jdbc:postgresql://host:5432/db
      */
-    static DbParts parseDatabaseUrl(String raw) {
+    static DbParts parseDatabaseUrl(String raw, Environment env) {
         String value = raw.trim();
         if (value.startsWith("jdbc:postgresql://") && !value.contains("@")) {
-            // Already a clean JDBC URL without credentials
             return new DbParts(withSsl(value), null, null);
         }
 
-        // Normalize to URI-parseable form
         String normalized = value;
         if (normalized.startsWith("jdbc:postgresql://")) {
             normalized = "postgresql://" + normalized.substring("jdbc:postgresql://".length());
@@ -94,11 +94,10 @@ public class ProdDataSourceConfig {
 
         try {
             URI uri = new URI(normalized);
-            String host = toRenderInternalHost(uri.getHost());
+            String host = expandShortRenderHost(uri.getHost(), env);
             int port = uri.getPort() > 0 ? uri.getPort() : 5432;
             String path = uri.getPath();
             String db = (path != null && path.startsWith("/")) ? path.substring(1) : path;
-            // strip query from db name if present
             if (db != null && db.contains("?")) {
                 db = db.substring(0, db.indexOf('?'));
             }
@@ -123,17 +122,31 @@ public class ProdDataSourceConfig {
         }
     }
 
-    static String toRenderInternalHost(String host) {
-        if (host == null) {
-            return null;
+    /**
+     * Short Render internal hosts (dpg-xxx-a) only resolve on the private network
+     * in the same region. Expand using DATABASE_HOST_SUFFIX when needed, e.g.
+     * singapore-postgres.render.com → dpg-xxx-a.singapore-postgres.render.com
+     */
+    static String expandShortRenderHost(String host, Environment env) {
+        if (host == null || host.contains(".")) {
+            return host;
         }
-        // dpg-xxx-a.singapore-postgres.render.com → dpg-xxx-a
-        if (host.contains("-postgres.render.com")) {
-            int dot = host.indexOf('.');
-            if (dot > 0) {
-                return host.substring(0, dot);
-            }
+        String override = env != null ? firstNonBlank(env.getProperty("DATABASE_EXTERNAL_HOST")) : null;
+        if (!isBlank(override)) {
+            return override;
         }
+        String suffix = env != null ? firstNonBlank(env.getProperty("DATABASE_HOST_SUFFIX")) : null;
+        if (!isBlank(suffix)) {
+            String expanded = host + "." + suffix.replaceFirst("^\\.", "");
+            log.warn("Expanded short Render DB host {} → {} (set External DATABASE_URL to avoid this)",
+                    host, expanded);
+            return expanded;
+        }
+        log.warn(
+                "Using short DB host '{}'. If deploy fails with UnknownHostException, "
+                        + "set DATABASE_URL to the Render External Database URL "
+                        + "(host like dpg-xxx-a.REGION-postgres.render.com).",
+                host);
         return host;
     }
 

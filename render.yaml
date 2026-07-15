@@ -15,9 +15,15 @@ services:
         value: prod
       - key: JWT_SECRET
         generateValue: true
-      # Paste same values from openplot-api → Environment (buffalo_db)
+      # Use Render DB → Connect → External Database URL (not Internal).
+      # Internal short hosts (dpg-xxx-a) only work same-region private network.
+      - key: DATABASE_URL
+        sync: false
+      # Optional fallbacks if DATABASE_URL is not set:
       - key: DATABASE_HOST
         sync: false
+      - key: DATABASE_HOST_SUFFIX
+        value: singapore-postgres.render.com
       - key: DATABASE_PORT
         value: "5432"
       - key: DATABASE_NAME

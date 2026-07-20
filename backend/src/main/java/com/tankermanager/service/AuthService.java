@@ -32,6 +32,7 @@ public class AuthService {
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
 
+    @Transactional(readOnly = true)
     public AuthResponse login(LoginRequest req) {
         authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(req.getPhone(), req.getPassword()));
@@ -93,9 +94,10 @@ public class AuthService {
         return toAuthResponse(user);
     }
 
+    @Transactional(readOnly = true)
     public AuthResponse me() {
         UserPrincipal principal = SecurityUtils.currentUser();
-        UserAccount user = userAccountRepository.findById(principal.getId())
+        UserAccount user = userAccountRepository.findByIdWithOperator(principal.getId())
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         return toAuthResponse(user);
     }

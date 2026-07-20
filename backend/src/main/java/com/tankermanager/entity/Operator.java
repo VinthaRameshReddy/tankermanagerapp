@@ -10,7 +10,7 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "operators")
+@Table(name = "tanker_operators")
 @Getter
 @Setter
 @NoArgsConstructor

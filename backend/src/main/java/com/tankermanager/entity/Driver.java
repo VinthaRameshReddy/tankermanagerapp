@@ -10,8 +10,8 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "drivers", indexes = {
-        @Index(name = "idx_drivers_operator", columnList = "operator_id")
+@Table(name = "tanker_drivers", indexes = {
+        @Index(name = "idx_tanker_drivers_operator", columnList = "operator_id")
 })
 @Getter
 @Setter

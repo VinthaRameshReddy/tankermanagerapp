@@ -10,9 +10,9 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
-@Table(name = "tankers", indexes = {
-        @Index(name = "idx_tankers_operator", columnList = "operator_id"),
-        @Index(name = "idx_tankers_number", columnList = "vehicle_number")
+@Table(name = "tanker_fleet", indexes = {
+        @Index(name = "idx_tanker_fleet_operator", columnList = "operator_id"),
+        @Index(name = "idx_tanker_fleet_number", columnList = "vehicle_number")
 })
 @Getter
 @Setter

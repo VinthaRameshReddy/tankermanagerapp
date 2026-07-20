@@ -10,9 +10,9 @@ import java.time.Instant;
 import java.time.LocalDate;
 
 @Entity
-@Table(name = "expenses", indexes = {
-        @Index(name = "idx_expenses_operator", columnList = "operator_id"),
-        @Index(name = "idx_expenses_tanker", columnList = "tanker_id")
+@Table(name = "tanker_expenses", indexes = {
+        @Index(name = "idx_tanker_expenses_operator", columnList = "operator_id"),
+        @Index(name = "idx_tanker_expenses_tanker", columnList = "tanker_id")
 })
 @Getter
 @Setter

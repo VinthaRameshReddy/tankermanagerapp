@@ -10,11 +10,11 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
-@Table(name = "trips", indexes = {
-        @Index(name = "idx_trips_operator", columnList = "operator_id"),
-        @Index(name = "idx_trips_status", columnList = "status"),
-        @Index(name = "idx_trips_customer", columnList = "customer_id"),
-        @Index(name = "idx_trips_driver", columnList = "driver_id")
+@Table(name = "tanker_trips", indexes = {
+        @Index(name = "idx_tanker_trips_operator", columnList = "operator_id"),
+        @Index(name = "idx_tanker_trips_status", columnList = "status"),
+        @Index(name = "idx_tanker_trips_customer", columnList = "customer_id"),
+        @Index(name = "idx_tanker_trips_driver", columnList = "driver_id")
 })
 @Getter
 @Setter

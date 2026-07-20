@@ -9,8 +9,8 @@ import java.time.Instant;
 import java.time.YearMonth;
 
 @Entity
-@Table(name = "driver_salaries", indexes = {
-        @Index(name = "idx_salary_driver_month", columnList = "driver_id,salary_month", unique = true)
+@Table(name = "tanker_driver_salaries", indexes = {
+        @Index(name = "idx_tanker_salary_driver_month", columnList = "driver_id,salary_month", unique = true)
 })
 @Getter
 @Setter

@@ -9,8 +9,8 @@ import java.math.BigDecimal;
 import java.time.Instant;
 
 @Entity
-@Table(name = "bore_locations", indexes = {
-        @Index(name = "idx_bore_operator", columnList = "operator_id")
+@Table(name = "tanker_bore_locations", indexes = {
+        @Index(name = "idx_tanker_bore_operator", columnList = "operator_id")
 })
 @Getter
 @Setter

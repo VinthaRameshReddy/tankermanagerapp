@@ -15,23 +15,12 @@ services:
         value: prod
       - key: JWT_SECRET
         generateValue: true
-      # Use Render DB → Connect → External Database URL (not Internal).
-      # Internal short hosts (dpg-xxx-a) only work same-region private network.
+      # Paste full External Database URL from Render DB → Connect.
+      # Do not also set DATABASE_USER/PASSWORD unless URL has no credentials.
       - key: DATABASE_URL
-        sync: false
-      # Optional fallbacks if DATABASE_URL is not set:
-      - key: DATABASE_HOST
         sync: false
       - key: DATABASE_HOST_SUFFIX
         value: singapore-postgres.render.com
-      - key: DATABASE_PORT
-        value: "5432"
-      - key: DATABASE_NAME
-        sync: false
-      - key: DATABASE_USER
-        sync: false
-      - key: DATABASE_PASSWORD
-        sync: false
       - key: APP_PUBLIC_BASE_URL
         sync: false
       - key: MAPS_PROVIDER

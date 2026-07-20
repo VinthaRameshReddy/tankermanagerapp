@@ -51,11 +51,19 @@ public class ProdDataSourceConfig {
 
         if (!isBlank(rawUrl)) {
             DbParts fromUrl = parseDatabaseUrl(rawUrl, env);
-            if (!isBlank(user)) {
+            // Prefer credentials embedded in DATABASE_URL. Only fill gaps from
+            // DATABASE_USER / DATABASE_PASSWORD so stale overrides cannot win.
+            if (isBlank(fromUrl.username) && !isBlank(user)) {
                 fromUrl.username = user;
             }
-            if (!isBlank(pass)) {
+            if (isBlank(fromUrl.password) && !isBlank(pass)) {
                 fromUrl.password = pass;
+            }
+            if (isBlank(fromUrl.username) || isBlank(fromUrl.password)) {
+                throw new IllegalStateException(
+                        "DATABASE_URL is set but username/password are missing. "
+                                + "Paste the full External Database URL from Render, or set "
+                                + "DATABASE_USER and DATABASE_PASSWORD.");
             }
             return fromUrl;
         }

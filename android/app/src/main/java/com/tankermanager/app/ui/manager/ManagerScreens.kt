@@ -47,7 +47,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.Modifier
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -131,7 +131,7 @@ fun ManagerShell(
             }
         }
     ) { padding ->
-        Box(Modifier = Modifier.padding(padding)) {
+        Box(modifier = Modifier.padding(padding)) {
             when (tab) {
                 0 -> DashboardTab(repo, onLogout)
                 1 -> TripsTab(repo, onOpenTrip, onOpenTrack)
@@ -501,7 +501,7 @@ private fun FleetTab(repo: TankerRepository) {
                 ) {
                     items(tankers, key = { it.id }) { t ->
                         GlassCard {
-                            Row(Modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                 Column {
                                     Text(t.vehicleNumber, fontWeight = FontWeight.Bold)
                                     Text("${t.capacityLitres ?: "—"} L", color = MaterialTheme.colorScheme.onSurfaceVariant)

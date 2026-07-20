@@ -17,7 +17,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.modifier
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -53,9 +53,9 @@ fun AuthScreen(
                 .padding(horizontal = 22.dp, vertical = 36.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(24.dp))
             PulsingTruck()
-            Spacer(Modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             Text(
                 "TankerFlow",
                 style = MaterialTheme.typography.displayLarge,
@@ -111,7 +111,7 @@ fun AuthScreen(
                 }
             }
 
-            Spacer(Modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(16.dp))
             GhostButton(
                 text = "Track a delivery",
                 onClick = onTrackTap,

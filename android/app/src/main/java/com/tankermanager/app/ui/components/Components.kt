@@ -43,7 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.Modifier
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Brush
@@ -169,7 +169,7 @@ fun GlassCard(
         tonalElevation = 1.dp,
         shadowElevation = 4.dp
     ) {
-        Column(Modifier = Modifier.padding(18.dp), content = content)
+        Column(modifier = Modifier.padding(18.dp), content = content)
     }
 }
 
@@ -192,7 +192,7 @@ fun StatChip(
             ) {
                 Icon(icon, contentDescription = null, tint = accent)
             }
-            Spacer(Modifier = Modifier.width(12.dp))
+            Spacer(modifier = Modifier.width(12.dp))
             Column {
                 Text(title, style = MaterialTheme.typography.bodyMedium, color = InkMuted)
                 Text(
@@ -332,7 +332,7 @@ fun ScreenScaffold(
             }
             topBarExtra?.invoke()
         }
-        Spacer(Modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(18.dp))
         content()
     }
 }
@@ -346,7 +346,7 @@ fun EmptyState(message: String) {
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         PulsingTruck()
-        Spacer(Modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(16.dp))
         Text(message, color = InkMuted)
     }
 }

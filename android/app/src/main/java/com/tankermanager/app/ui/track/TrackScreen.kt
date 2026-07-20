@@ -28,7 +28,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier.modifier
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
@@ -65,21 +65,22 @@ fun TrackScreen(
 
     LaunchedEffect(token) {
         if (token.isBlank()) return@LaunchedEffect
-        while (true) {
+        var keepPolling = true
+        while (keepPolling) {
             loading = true
             repo.safe { track(token.trim()) }
                 .onSuccess {
                     tracking = it
                     error = null
                     loading = false
-                    if (it.trackingEnabled != true) break
+                    if (it.trackingEnabled != true) keepPolling = false
                 }
                 .onFailure {
                     error = it.message
                     loading = false
-                    break
+                    keepPolling = false
                 }
-            delay(5000)
+            if (keepPolling) delay(5000)
         }
     }
 

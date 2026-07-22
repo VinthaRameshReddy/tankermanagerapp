@@ -73,6 +73,19 @@ public class ManagerController {
         return fleetService.findByPhone(phone);
     }
 
+    @GetMapping("/customers/{id}/locations")
+    public List<CustomerLocationResponse> listCustomerLocations(@PathVariable Long id) {
+        return fleetService.listCustomerLocations(id);
+    }
+
+    @PostMapping("/customers/{id}/locations")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CustomerLocationResponse addCustomerLocation(
+            @PathVariable Long id,
+            @RequestBody CustomerLocationRequest request) {
+        return fleetService.addCustomerLocation(id, request);
+    }
+
     // Bores
     @PostMapping("/bores")
     @ResponseStatus(HttpStatus.CREATED)

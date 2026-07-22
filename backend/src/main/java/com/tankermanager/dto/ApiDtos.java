@@ -44,6 +44,31 @@ public final class ApiDtos {
         private String defaultAddress;
         private BigDecimal defaultLat;
         private BigDecimal defaultLng;
+        /** Optional Google Maps share link — parsed into a saved delivery location. */
+        private String mapsLink;
+        /** Label for the location created from mapsLink (default: "Delivery"). */
+        private String locationLabel;
+    }
+
+    @Data
+    public static class CustomerLocationRequest {
+        private String label;
+        private String address;
+        /** Google Maps link from customer — preferred way to set lat/lng. */
+        private String mapsLink;
+        private BigDecimal latitude;
+        private BigDecimal longitude;
+    }
+
+    @Data
+    @Builder
+    public static class CustomerLocationResponse {
+        private Long id;
+        private String label;
+        private String address;
+        private BigDecimal latitude;
+        private BigDecimal longitude;
+        private String mapsLink;
     }
 
     @Data
@@ -55,6 +80,7 @@ public final class ApiDtos {
         private String defaultAddress;
         private BigDecimal defaultLat;
         private BigDecimal defaultLng;
+        private List<CustomerLocationResponse> locations;
     }
 
     @Data
@@ -91,12 +117,13 @@ public final class ApiDtos {
         @NotNull
         private Long driverId;
         private Long boreId;
-        @NotBlank
+        /** Preferred: pick a saved customer delivery location. */
+        private Long customerLocationId;
         private String dropAddress;
-        @NotNull
         private BigDecimal dropLat;
-        @NotNull
         private BigDecimal dropLng;
+        /** Optional Maps link when booking without a saved location. */
+        private String mapsLink;
         private String notes;
     }
 
@@ -136,6 +163,10 @@ public final class ApiDtos {
         private BigDecimal boreLat;
         private BigDecimal boreLng;
         private Integer etaMinutes;
+        /** Straight-line / route distance bore → drop (km). */
+        private Double distanceKm;
+        /** Open-in-maps URL for the drop point. */
+        private String mapsNavigateUrl;
         private String trackingToken;
         private boolean trackingEnabled;
         private Instant assignedAt;

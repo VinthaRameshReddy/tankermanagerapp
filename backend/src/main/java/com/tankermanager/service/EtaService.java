@@ -36,6 +36,15 @@ public class EtaService {
     @Value("${app.maps.ors-base-url:https://api.openrouteservice.org}")
     private String orsBaseUrl;
 
+    public double distanceKm(BigDecimal fromLat, BigDecimal fromLng, BigDecimal toLat, BigDecimal toLng) {
+        if (fromLat == null || fromLng == null || toLat == null || toLng == null) {
+            return 0;
+        }
+        return haversineKm(
+                fromLat.doubleValue(), fromLng.doubleValue(),
+                toLat.doubleValue(), toLng.doubleValue());
+    }
+
     public int estimateMinutes(BigDecimal fromLat, BigDecimal fromLng, BigDecimal toLat, BigDecimal toLng) {
         if (fromLat == null || fromLng == null || toLat == null || toLng == null) {
             return 45;

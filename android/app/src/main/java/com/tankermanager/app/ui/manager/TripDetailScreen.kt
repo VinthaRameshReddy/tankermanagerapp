@@ -104,9 +104,27 @@ fun TripDetailScreen(
                 Text("Bore → Customer", color = LagoonDeep, fontWeight = FontWeight.SemiBold)
                 Text("${t.boreName}  →  ${t.dropAddress}")
                 Text("${t.tankerNumber} • Driver ${t.driverName}")
+                if (t.distanceKm != null) {
+                    Text("Distance ~ ${t.distanceKm} km", fontWeight = FontWeight.Bold, color = Lagoon)
+                }
                 if (t.etaMinutes != null) {
                     Text("ETA ~ ${t.etaMinutes} min", fontWeight = FontWeight.Bold, color = Lagoon)
                 }
+            }
+
+            val context = androidx.compose.ui.platform.LocalContext.current
+            if (!t.mapsNavigateUrl.isNullOrBlank()) {
+                PrimaryButton("Open drop on Google Maps", onClick = {
+                    try {
+                        val intent = android.content.Intent(
+                            android.content.Intent.ACTION_VIEW,
+                            android.net.Uri.parse(t.mapsNavigateUrl)
+                        )
+                        context.startActivity(intent)
+                    } catch (_: Exception) {
+                        error = "Could not open Maps"
+                    }
+                })
             }
 
             GlassCard {

@@ -63,6 +63,8 @@ fun FleetHub(repo: TankerRepository) {
     var customerName by remember { mutableStateOf("") }
     var customerPhone by remember { mutableStateOf("") }
     var customerAddress by remember { mutableStateOf("") }
+    var customerMapsLink by remember { mutableStateOf("") }
+    var customerLocLabel by remember { mutableStateOf("Home") }
     var boreName by remember { mutableStateOf("Main Bore") }
     var boreAddress by remember { mutableStateOf("") }
     var boreLat by remember { mutableStateOf("17.3850") }
@@ -197,20 +199,30 @@ fun FleetHub(repo: TankerRepository) {
             3 -> {
                 SoftField(customerName, { customerName = it }, "Customer name")
                 SoftField(customerPhone, { customerPhone = it }, "Customer phone")
-                SoftField(customerAddress, { customerAddress = it }, "Default address")
-                PrimaryButton("Save customer", onClick = {
+                SoftField(customerLocLabel, { customerLocLabel = it }, "Location label (Home / Office / Site)")
+                SoftField(customerAddress, { customerAddress = it }, "Address / landmark")
+                SoftField(customerMapsLink, { customerMapsLink = it }, "Google Maps link from customer")
+                Text(
+                    "Ask customer to WhatsApp Google Maps → Share → Copy link. Same phone can have many sites.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+                PrimaryButton("Save customer + location", onClick = {
                     scope.launch {
                         repo.safe {
                             upsertCustomer(
                                 CustomerRequest(
                                     name = customerName.trim(),
                                     phone = customerPhone.trim(),
-                                    defaultAddress = customerAddress.trim().ifBlank { null }
+                                    defaultAddress = customerAddress.trim().ifBlank { null },
+                                    mapsLink = customerMapsLink.trim().ifBlank { null },
+                                    locationLabel = customerLocLabel.trim().ifBlank { "Delivery" }
                                 )
                             )
                         }.onSuccess {
                             customerName = ""; customerPhone = ""; customerAddress = ""
-                            refresh(); msg = "Customer saved"
+                            customerMapsLink = ""; customerLocLabel = "Home"
+                            refresh(); msg = "Customer & delivery location saved"
                         }.onFailure { msg = it.message }
                     }
                 })
@@ -220,7 +232,17 @@ fun FleetHub(repo: TankerRepository) {
                         GlassCard {
                             Text(c.name ?: "Customer", fontWeight = FontWeight.Bold)
                             Text(c.phone ?: "")
-                            Text(c.defaultAddress ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            val locs = c.locations.orEmpty()
+                            if (locs.isEmpty()) {
+                                Text(c.defaultAddress ?: "No locations yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            } else {
+                                locs.forEach { loc ->
+                                    Text(
+                                        "• ${loc.label}: ${loc.address}",
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
                         }
                     }
                 }

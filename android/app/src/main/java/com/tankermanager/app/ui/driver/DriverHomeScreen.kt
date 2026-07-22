@@ -141,12 +141,34 @@ fun DriverHomeScreen(repo: TankerRepository, onLogout: () -> Unit) {
                 }
 
                 selected?.let { trip ->
+                    val context = androidx.compose.ui.platform.LocalContext.current
                     GlassCard {
                         Text("Current job", fontWeight = FontWeight.Bold)
                         Text(friendlyStatus(trip.status), color = LagoonDeep, style = MaterialTheme.typography.titleLarge)
                         Text("Bore: ${trip.boreName}")
                         Text("Drop: ${trip.dropAddress}")
-                        Spacer(modifier = Modifier.height(10.dp))
+                        if (trip.distanceKm != null) {
+                            Text("Distance ~ ${trip.distanceKm} km", fontWeight = FontWeight.SemiBold)
+                        }
+                        if (trip.etaMinutes != null) {
+                            Text("ETA ~ ${trip.etaMinutes} min")
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (!trip.mapsNavigateUrl.isNullOrBlank()) {
+                            PrimaryButton("Navigate to drop (Maps)", onClick = {
+                                try {
+                                    context.startActivity(
+                                        android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(trip.mapsNavigateUrl)
+                                        )
+                                    )
+                                } catch (_: Exception) {
+                                    error = "Could not open Maps"
+                                }
+                            })
+                            Spacer(modifier = Modifier.height(8.dp))
+                        }
                         val next = nextStatus(trip.status)
                         if (next != null) {
                             PrimaryButton("Update → ${friendlyStatus(next)}", onClick = {

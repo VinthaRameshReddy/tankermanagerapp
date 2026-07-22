@@ -57,6 +57,7 @@ import com.tankermanager.app.data.model.BoreExpenseRequest
 import com.tankermanager.app.data.model.BoreRequest
 import com.tankermanager.app.data.model.BookTripRequest
 import com.tankermanager.app.data.model.CreateStaffRequest
+import com.tankermanager.app.data.model.CustomerResponse
 import com.tankermanager.app.data.model.DashboardResponse
 import com.tankermanager.app.data.model.DriverResponse
 import com.tankermanager.app.data.model.ExpenseRequest
@@ -321,9 +322,15 @@ fun TripCard(trip: TripResponse, onOpen: () -> Unit, onTrack: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         Text("${trip.tankerNumber ?: "—"}  •  ${trip.driverName ?: "—"}")
         Text(trip.dropAddress ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-        if (trip.etaMinutes != null && trip.status !in listOf("COMPLETED", "CANCELLED")) {
-            Spacer(modifier = Modifier.height(6.dp))
-            Text("ETA ~ ${trip.etaMinutes} min", color = LagoonDeep, fontWeight = FontWeight.SemiBold)
+        if (trip.distanceKm != null || trip.etaMinutes != null) {
+            Text(
+                listOfNotNull(
+                    trip.distanceKm?.let { "~$it km" },
+                    trip.etaMinutes?.let { "ETA ${it}m" }
+                ).joinToString(" • "),
+                color = Lagoon,
+                fontWeight = FontWeight.SemiBold
+            )
         }
         if (trip.trackingEnabled == true && !trip.trackingToken.isNullOrBlank()) {
             TextButton(onClick = onTrack, contentPadding = PaddingValues(0.dp)) {
@@ -340,11 +347,13 @@ private fun BookTripSheet(
     onDismiss: () -> Unit,
     onBooked: (Long) -> Unit
 ) {
+    var customers by remember { mutableStateOf<List<CustomerResponse>>(emptyList()) }
+    var selectedCustomerId by remember { mutableStateOf<Long?>(null) }
+    var selectedLocationId by remember { mutableStateOf<Long?>(null) }
     var phone by remember { mutableStateOf("") }
     var name by remember { mutableStateOf("") }
+    var mapsLink by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
-    var lat by remember { mutableStateOf("17.3850") }
-    var lng by remember { mutableStateOf("78.4867") }
     var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
     var drivers by remember { mutableStateOf<List<DriverResponse>>(emptyList()) }
     var tankerId by remember { mutableStateOf<Long?>(null) }
@@ -353,7 +362,18 @@ private fun BookTripSheet(
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
+    val selectedCustomer = customers.firstOrNull { it.id == selectedCustomerId }
+    val locations = selectedCustomer?.locations.orEmpty()
+
     LaunchedEffect(Unit) {
+        repo.safe { customers() }.onSuccess {
+            customers = it
+            selectedCustomerId = it.firstOrNull()?.id
+            phone = it.firstOrNull()?.phone.orEmpty()
+            name = it.firstOrNull()?.name.orEmpty()
+            selectedLocationId = it.firstOrNull()?.locations?.firstOrNull()?.id
+            address = it.firstOrNull()?.locations?.firstOrNull()?.address.orEmpty()
+        }
         repo.safe { tankers() }.onSuccess {
             tankers = it.filter { t -> t.status == "AVAILABLE" }
             tankerId = tankers.firstOrNull()?.id
@@ -377,15 +397,61 @@ private fun BookTripSheet(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Book a trip", style = MaterialTheme.typography.headlineMedium)
-                Text("Customer is matched by phone number", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(
+                    "Pick customer → choose delivery site. Same phone can have many locations.",
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 ErrorBanner(error)
-                SoftField(phone, { phone = it }, "Customer phone")
-                SoftField(name, { name = it }, "Customer name (if new)")
-                SoftField(address, { address = it }, "Drop address")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SoftField(lat, { lat = it }, "Lat", modifier = Modifier.weight(1f))
-                    SoftField(lng, { lng = it }, "Lng", modifier = Modifier.weight(1f))
+
+                Text("Customer", fontWeight = FontWeight.SemiBold)
+                customers.take(12).forEach { c ->
+                    FilterChip(
+                        selected = selectedCustomerId == c.id,
+                        onClick = {
+                            selectedCustomerId = c.id
+                            phone = c.phone.orEmpty()
+                            name = c.name.orEmpty()
+                            val first = c.locations.orEmpty().firstOrNull()
+                            selectedLocationId = first?.id
+                            address = first?.address.orEmpty()
+                            mapsLink = ""
+                        },
+                        label = { Text("${c.name} (${c.phone})") }
+                    )
                 }
+
+                SoftField(phone, {
+                    phone = it
+                    selectedCustomerId = null
+                    selectedLocationId = null
+                }, "Or type customer phone")
+                SoftField(name, { name = it }, "Customer name (if new)")
+
+                Text("Delivery location", fontWeight = FontWeight.SemiBold)
+                if (locations.isEmpty()) {
+                    Text(
+                        "No saved sites — paste Maps link below or register location in Fleet → Customers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    locations.forEach { loc ->
+                        FilterChip(
+                            selected = selectedLocationId == loc.id,
+                            onClick = {
+                                selectedLocationId = loc.id
+                                address = loc.address.orEmpty()
+                                mapsLink = ""
+                            },
+                            label = { Text(loc.label ?: loc.address ?: "Site") }
+                        )
+                    }
+                }
+                SoftField(address, { address = it }, "Drop address / landmark")
+                SoftField(mapsLink, {
+                    mapsLink = it
+                    if (it.isNotBlank()) selectedLocationId = null
+                }, "Or paste new Google Maps link")
 
                 Text("Select tanker", fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -415,6 +481,14 @@ private fun BookTripSheet(
                         error = "Pick tanker and driver"
                         return@PrimaryButton
                     }
+                    if (phone.isBlank()) {
+                        error = "Customer phone required"
+                        return@PrimaryButton
+                    }
+                    if (selectedLocationId == null && mapsLink.isBlank() && address.isBlank()) {
+                        error = "Pick a delivery location or paste Maps link"
+                        return@PrimaryButton
+                    }
                     loading = true
                     error = null
                     scope.launch {
@@ -425,9 +499,9 @@ private fun BookTripSheet(
                                     customerName = name.trim().ifBlank { null },
                                     tankerId = tid,
                                     driverId = did,
-                                    dropAddress = address.trim(),
-                                    dropLat = lat.toDoubleOrNull() ?: 17.385,
-                                    dropLng = lng.toDoubleOrNull() ?: 78.4867
+                                    customerLocationId = selectedLocationId,
+                                    dropAddress = address.trim().ifBlank { null },
+                                    mapsLink = mapsLink.trim().ifBlank { null }
                                 )
                             )
                         }

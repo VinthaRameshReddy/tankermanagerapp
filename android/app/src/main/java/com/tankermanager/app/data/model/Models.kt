@@ -94,13 +94,31 @@ data class DriverResponse(
     val active: Boolean?
 )
 
+data class CustomerLocationResponse(
+    val id: Long,
+    val label: String?,
+    val address: String?,
+    val latitude: Double?,
+    val longitude: Double?,
+    val mapsLink: String?
+)
+
+data class CustomerLocationRequest(
+    val label: String? = null,
+    val address: String? = null,
+    val mapsLink: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null
+)
+
 data class CustomerResponse(
     val id: Long,
     val name: String?,
     val phone: String?,
     val defaultAddress: String?,
     val defaultLat: Double?,
-    val defaultLng: Double?
+    val defaultLng: Double?,
+    val locations: List<CustomerLocationResponse>? = null
 )
 
 data class CustomerRequest(
@@ -108,7 +126,9 @@ data class CustomerRequest(
     val phone: String,
     val defaultAddress: String? = null,
     val defaultLat: Double? = null,
-    val defaultLng: Double? = null
+    val defaultLng: Double? = null,
+    val mapsLink: String? = null,
+    val locationLabel: String? = null
 )
 
 data class BoreResponse(
@@ -134,9 +154,11 @@ data class BookTripRequest(
     val tankerId: Long,
     val driverId: Long,
     val boreId: Long? = null,
-    val dropAddress: String,
-    val dropLat: Double,
-    val dropLng: Double,
+    val customerLocationId: Long? = null,
+    val dropAddress: String? = null,
+    val dropLat: Double? = null,
+    val dropLng: Double? = null,
+    val mapsLink: String? = null,
     val notes: String? = null
 )
 
@@ -165,6 +187,8 @@ data class TripResponse(
     val boreLat: Double?,
     val boreLng: Double?,
     val etaMinutes: Int?,
+    val distanceKm: Double? = null,
+    val mapsNavigateUrl: String? = null,
     val trackingToken: String?,
     val trackingEnabled: Boolean?,
     val assignedAt: String?,

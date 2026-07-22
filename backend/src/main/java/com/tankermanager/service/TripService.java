@@ -33,6 +33,7 @@ public class TripService {
     private final TripStatusHistoryRepository historyRepository;
     private final VehicleLocationRepository locationRepository;
     private final CustomerRepository customerRepository;
+    private final CustomerLocationRepository customerLocationRepository;
     private final TankerRepository tankerRepository;
     private final DriverRepository driverRepository;
     private final BoreLocationRepository boreRepository;
@@ -58,11 +59,53 @@ public class TripService {
                             .operator(operator)
                             .name(req.getCustomerName())
                             .phone(req.getCustomerPhone())
-                            .defaultAddress(req.getDropAddress())
-                            .defaultLat(req.getDropLat())
-                            .defaultLng(req.getDropLng())
                             .build());
                 });
+
+        java.math.BigDecimal dropLat = req.getDropLat();
+        java.math.BigDecimal dropLng = req.getDropLng();
+        String dropAddress = req.getDropAddress();
+        Long locationId = req.getCustomerLocationId();
+
+        if (locationId != null) {
+            CustomerLocation loc = customerLocationRepository.findByIdAndCustomerOperatorId(locationId, operatorId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Customer location not found"));
+            if (!loc.getCustomer().getId().equals(customer.getId())) {
+                throw new BadRequestException("Location does not belong to this customer");
+            }
+            dropLat = loc.getLatitude();
+            dropLng = loc.getLongitude();
+            dropAddress = loc.getAddress();
+        } else if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
+            var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
+            dropLat = coords.latitude();
+            dropLng = coords.longitude();
+            if (dropAddress == null || dropAddress.isBlank()) {
+                dropAddress = "Maps drop location";
+            }
+            // Persist as a reusable location for this customer
+            customerLocationRepository.save(CustomerLocation.builder()
+                    .customer(customer)
+                    .label("Trip drop")
+                    .address(dropAddress)
+                    .latitude(dropLat)
+                    .longitude(dropLng)
+                    .mapsLink(req.getMapsLink().trim())
+                    .active(true)
+                    .build());
+        }
+
+        if (dropLat == null || dropLng == null) {
+            throw new BadRequestException("Select a customer delivery location or provide drop coordinates / Maps link");
+        }
+        if (dropAddress == null || dropAddress.isBlank()) {
+            dropAddress = "Delivery point";
+        }
+
+        customer.setDefaultAddress(dropAddress);
+        customer.setDefaultLat(dropLat);
+        customer.setDefaultLng(dropLng);
+        customerRepository.save(customer);
 
         Tanker tanker = tankerRepository.findByIdAndOperatorId(req.getTankerId(), operatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tanker not found"));
@@ -88,7 +131,7 @@ public class TripService {
 
         UserAccount bookedBy = userAccountRepository.findById(current.getId()).orElse(null);
 
-        int eta = etaService.estimateMinutes(bore.getLatitude(), bore.getLongitude(), req.getDropLat(), req.getDropLng());
+        int eta = etaService.estimateMinutes(bore.getLatitude(), bore.getLongitude(), dropLat, dropLng);
 
         Trip trip = Trip.builder()
                 .tripCode("TRP-" + Instant.now().getEpochSecond() + "-" + (int) (Math.random() * 900 + 100))
@@ -99,9 +142,9 @@ public class TripService {
                 .bore(bore)
                 .bookedBy(bookedBy)
                 .status(TripStatus.ASSIGNED)
-                .dropAddress(req.getDropAddress())
-                .dropLat(req.getDropLat())
-                .dropLng(req.getDropLng())
+                .dropAddress(dropAddress)
+                .dropLat(dropLat)
+                .dropLng(dropLng)
                 .etaMinutes(eta)
                 .assignedAt(Instant.now())
                 .trackingToken(UUID.randomUUID().toString().replace("-", ""))
@@ -320,6 +363,11 @@ public class TripService {
                 .boreLat(trip.getBore().getLatitude())
                 .boreLng(trip.getBore().getLongitude())
                 .etaMinutes(trip.getEtaMinutes())
+                .distanceKm(round1(etaService.distanceKm(
+                        trip.getBore().getLatitude(), trip.getBore().getLongitude(),
+                        trip.getDropLat(), trip.getDropLng())))
+                .mapsNavigateUrl("https://www.google.com/maps/dir/?api=1&destination="
+                        + trip.getDropLat() + "," + trip.getDropLng())
                 .trackingToken(trip.getTrackingToken())
                 .trackingEnabled(trip.isTrackingEnabled())
                 .assignedAt(trip.getAssignedAt())
@@ -339,5 +387,9 @@ public class TripService {
                     .collect(Collectors.toList()));
         }
         return b.build();
+    }
+
+    private static Double round1(double km) {
+        return Math.round(km * 10.0) / 10.0;
     }
 }

@@ -26,6 +26,7 @@ public class FleetService {
     private final TankerRepository tankerRepository;
     private final DriverRepository driverRepository;
     private final CustomerRepository customerRepository;
+    private final CustomerLocationRepository customerLocationRepository;
     private final BoreLocationRepository boreRepository;
     private final OperatorRepository operatorRepository;
     private final ExpenseRepository expenseRepository;
@@ -94,7 +95,111 @@ public class FleetService {
         customer.setDefaultLat(req.getDefaultLat());
         customer.setDefaultLng(req.getDefaultLng());
         customer.setActive(true);
-        return toCustomer(customerRepository.save(customer));
+
+        if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
+            var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
+            customer.setDefaultLat(coords.latitude());
+            customer.setDefaultLng(coords.longitude());
+            if (customer.getDefaultAddress() == null || customer.getDefaultAddress().isBlank()) {
+                customer.setDefaultAddress(req.getDefaultAddress() != null && !req.getDefaultAddress().isBlank()
+                        ? req.getDefaultAddress()
+                        : "Shared Maps location");
+            }
+        }
+
+        customer = customerRepository.save(customer);
+
+        if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
+            var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
+            String label = (req.getLocationLabel() != null && !req.getLocationLabel().isBlank())
+                    ? req.getLocationLabel().trim()
+                    : "Delivery";
+            String address = (req.getDefaultAddress() != null && !req.getDefaultAddress().isBlank())
+                    ? req.getDefaultAddress().trim()
+                    : label;
+            customerLocationRepository.save(CustomerLocation.builder()
+                    .customer(customer)
+                    .label(label)
+                    .address(address)
+                    .latitude(coords.latitude())
+                    .longitude(coords.longitude())
+                    .mapsLink(req.getMapsLink().trim())
+                    .active(true)
+                    .build());
+        } else if (req.getDefaultLat() != null && req.getDefaultLng() != null) {
+            String label = (req.getLocationLabel() != null && !req.getLocationLabel().isBlank())
+                    ? req.getLocationLabel().trim()
+                    : "Delivery";
+            String address = (req.getDefaultAddress() != null && !req.getDefaultAddress().isBlank())
+                    ? req.getDefaultAddress().trim()
+                    : label;
+            customerLocationRepository.save(CustomerLocation.builder()
+                    .customer(customer)
+                    .label(label)
+                    .address(address)
+                    .latitude(req.getDefaultLat())
+                    .longitude(req.getDefaultLng())
+                    .active(true)
+                    .build());
+        }
+
+        return toCustomer(customer);
+    }
+
+    @Transactional
+    public CustomerLocationResponse addCustomerLocation(Long customerId, CustomerLocationRequest req) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+        if (!customer.getOperator().getId().equals(operatorId)) {
+            throw new BadRequestException("Customer not in your operator");
+        }
+
+        BigDecimal lat = req.getLatitude();
+        BigDecimal lng = req.getLongitude();
+        String mapsLink = req.getMapsLink();
+        if (mapsLink != null && !mapsLink.isBlank()) {
+            var coords = com.tankermanager.util.MapsLinkParser.parse(mapsLink);
+            lat = coords.latitude();
+            lng = coords.longitude();
+        }
+        if (lat == null || lng == null) {
+            throw new BadRequestException("Provide a Google Maps link or latitude/longitude");
+        }
+
+        String label = (req.getLabel() != null && !req.getLabel().isBlank()) ? req.getLabel().trim() : "Delivery";
+        String address = (req.getAddress() != null && !req.getAddress().isBlank())
+                ? req.getAddress().trim()
+                : label;
+
+        CustomerLocation loc = customerLocationRepository.save(CustomerLocation.builder()
+                .customer(customer)
+                .label(label)
+                .address(address)
+                .latitude(lat)
+                .longitude(lng)
+                .mapsLink(mapsLink != null ? mapsLink.trim() : null)
+                .active(true)
+                .build());
+
+        // Keep customer defaults in sync with latest location
+        customer.setDefaultAddress(address);
+        customer.setDefaultLat(lat);
+        customer.setDefaultLng(lng);
+        customerRepository.save(customer);
+
+        return toLocation(loc);
+    }
+
+    public List<CustomerLocationResponse> listCustomerLocations(Long customerId) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+        if (!customer.getOperator().getId().equals(operatorId)) {
+            throw new BadRequestException("Customer not in your operator");
+        }
+        return customerLocationRepository.findByCustomerIdAndActiveTrueOrderByCreatedAtDesc(customerId)
+                .stream().map(this::toLocation).collect(Collectors.toList());
     }
 
     public List<CustomerResponse> listCustomers() {
@@ -271,10 +376,26 @@ public class FleetService {
     }
 
     private CustomerResponse toCustomer(Customer c) {
+        List<CustomerLocationResponse> locs = customerLocationRepository
+                .findByCustomerIdAndActiveTrueOrderByCreatedAtDesc(c.getId())
+                .stream().map(this::toLocation).collect(Collectors.toList());
         return CustomerResponse.builder()
                 .id(c.getId()).name(c.getName()).phone(c.getPhone())
                 .defaultAddress(c.getDefaultAddress()).defaultLat(c.getDefaultLat())
-                .defaultLng(c.getDefaultLng()).build();
+                .defaultLng(c.getDefaultLng())
+                .locations(locs)
+                .build();
+    }
+
+    private CustomerLocationResponse toLocation(CustomerLocation loc) {
+        return CustomerLocationResponse.builder()
+                .id(loc.getId())
+                .label(loc.getLabel())
+                .address(loc.getAddress())
+                .latitude(loc.getLatitude())
+                .longitude(loc.getLongitude())
+                .mapsLink(loc.getMapsLink())
+                .build();
     }
 
     private BoreResponse toBore(BoreLocation b) {

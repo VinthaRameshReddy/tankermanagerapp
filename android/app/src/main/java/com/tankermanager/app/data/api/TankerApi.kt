@@ -50,6 +50,15 @@ interface TankerApi {
     @GET("api/manager/customers/by-phone/{phone}")
     suspend fun customerByPhone(@Path("phone") phone: String): CustomerResponse
 
+    @GET("api/manager/customers/{id}/locations")
+    suspend fun customerLocations(@Path("id") id: Long): List<CustomerLocationResponse>
+
+    @POST("api/manager/customers/{id}/locations")
+    suspend fun addCustomerLocation(
+        @Path("id") id: Long,
+        @Body body: CustomerLocationRequest
+    ): CustomerLocationResponse
+
     @GET("api/manager/bores")
     suspend fun bores(): List<BoreResponse>
 

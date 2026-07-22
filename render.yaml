@@ -1,4 +1,4 @@
-# Blueprint: web service only (reuse existing free Postgres — buffalo_db)
+# Blueprint: web service only (reuse existing free Postgres).
 # Render free tier allows only ONE free database.
 
 services:
@@ -15,14 +15,25 @@ services:
         value: prod
       - key: JWT_SECRET
         generateValue: true
-      # Paste full External Database URL from Render DB → Connect.
-      # Do not also set DATABASE_USER/PASSWORD unless URL has no credentials.
+      # REQUIRED: paste External Database URL from Render DB → Connect
+      # Example: postgres://USER:PASSWORD@dpg-xxx-a.singapore-postgres.render.com/DBNAME
       - key: DATABASE_URL
+        sync: false
+      # Fallbacks if DATABASE_URL is empty (set these from the same Connect page)
+      - key: DATABASE_HOST
         sync: false
       - key: DATABASE_HOST_SUFFIX
         value: singapore-postgres.render.com
-      - key: APP_PUBLIC_BASE_URL
+      - key: DATABASE_PORT
+        value: "5432"
+      - key: DATABASE_NAME
         sync: false
+      - key: DATABASE_USER
+        sync: false
+      - key: DATABASE_PASSWORD
+        sync: false
+      - key: APP_PUBLIC_BASE_URL
+        value: https://tanker-manager-api-4nvy.onrender.com
       - key: MAPS_PROVIDER
         value: openrouteservice
       - key: ORS_API_KEY
@@ -38,4 +49,4 @@ services:
       - key: CORS_ORIGINS
         value: "*"
 
-# No "databases:" block — uses existing buffalo_db (free-tier limit)
+# No "databases:" block — reuse existing free Postgres

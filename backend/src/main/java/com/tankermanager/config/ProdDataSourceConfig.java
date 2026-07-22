@@ -45,9 +45,27 @@ public class ProdDataSourceConfig {
     }
 
     private static DbParts resolve(Environment env) {
-        String rawUrl = firstNonBlank(env.getProperty("DATABASE_URL"), env.getProperty("spring.datasource.url"));
-        String user = firstNonBlank(env.getProperty("DATABASE_USER"), env.getProperty("DB_USERNAME"));
-        String pass = firstNonBlank(env.getProperty("DATABASE_PASSWORD"), env.getProperty("DB_PASSWORD"));
+        String rawUrl = firstNonBlank(
+                env.getProperty("DATABASE_URL"),
+                env.getProperty("SPRING_DATASOURCE_URL"),
+                env.getProperty("spring.datasource.url"));
+        String user = firstNonBlank(
+                env.getProperty("DATABASE_USER"),
+                env.getProperty("DB_USERNAME"),
+                env.getProperty("SPRING_DATASOURCE_USERNAME"),
+                env.getProperty("spring.datasource.username"));
+        String pass = firstNonBlank(
+                env.getProperty("DATABASE_PASSWORD"),
+                env.getProperty("DB_PASSWORD"),
+                env.getProperty("SPRING_DATASOURCE_PASSWORD"),
+                env.getProperty("spring.datasource.password"));
+
+        log.info(
+                "Prod DB env present: DATABASE_URL={} DATABASE_HOST={} DATABASE_NAME={} DATABASE_USER={}",
+                !isBlank(env.getProperty("DATABASE_URL")),
+                !isBlank(env.getProperty("DATABASE_HOST")),
+                !isBlank(env.getProperty("DATABASE_NAME")),
+                !isBlank(user));
 
         if (!isBlank(rawUrl)) {
             DbParts fromUrl = parseDatabaseUrl(rawUrl, env);
@@ -68,13 +86,14 @@ public class ProdDataSourceConfig {
             return fromUrl;
         }
 
-        String host = firstNonBlank(env.getProperty("DATABASE_HOST"));
-        String port = firstNonBlank(env.getProperty("DATABASE_PORT"), "5432");
-        String name = firstNonBlank(env.getProperty("DATABASE_NAME"));
+        String host = firstNonBlank(env.getProperty("DATABASE_HOST"), env.getProperty("DB_HOST"));
+        String port = firstNonBlank(env.getProperty("DATABASE_PORT"), env.getProperty("DB_PORT"), "5432");
+        String name = firstNonBlank(env.getProperty("DATABASE_NAME"), env.getProperty("DB_NAME"));
         if (isBlank(host) || isBlank(name) || isBlank(user) || isBlank(pass)) {
             throw new IllegalStateException(
-                    "Set DATABASE_URL (Render External Database URL) OR "
-                            + "DATABASE_HOST + DATABASE_NAME + DATABASE_USER + DATABASE_PASSWORD");
+                    "Missing DB config. In Render → Environment, set DATABASE_URL to the "
+                            + "External Database URL from your Postgres → Connect page. "
+                            + "Format: postgres://USER:PASSWORD@HOST/DBNAME");
         }
         host = expandShortRenderHost(host, env);
         String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + name);

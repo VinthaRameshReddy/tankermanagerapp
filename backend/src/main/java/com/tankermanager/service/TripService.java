@@ -237,6 +237,7 @@ public class TripService {
         }
     }
 
+    @Transactional(readOnly = true)
     public List<TripResponse> listForOperator() {
         Long operatorId = SecurityUtils.requireOperatorId();
         return tripRepository.findByOperatorIdOrderByCreatedAtDesc(operatorId).stream()
@@ -244,6 +245,7 @@ public class TripService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public List<TripResponse> listForDriver() {
         Long userId = SecurityUtils.currentUser().getId();
         Driver driver = driverRepository.findByUserId(userId)
@@ -253,6 +255,7 @@ public class TripService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public List<TripResponse> listActiveForDriver() {
         Long userId = SecurityUtils.currentUser().getId();
         Driver driver = driverRepository.findByUserId(userId)
@@ -263,6 +266,7 @@ public class TripService {
                 .collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public TripResponse getTrip(Long id) {
         Long operatorId = SecurityUtils.requireOperatorId();
         Trip trip = tripRepository.findByIdAndOperatorId(id, operatorId)

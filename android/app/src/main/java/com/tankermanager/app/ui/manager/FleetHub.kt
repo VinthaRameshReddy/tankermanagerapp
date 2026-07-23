@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -25,6 +26,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tankermanager.app.data.model.BoreRequest
 import com.tankermanager.app.data.model.CreateStaffRequest
+import com.tankermanager.app.data.model.CustomerLocationRequest
 import com.tankermanager.app.data.model.CustomerRequest
 import com.tankermanager.app.data.model.CustomerResponse
 import com.tankermanager.app.data.model.DriverResponse
@@ -65,6 +67,10 @@ fun FleetHub(repo: TankerRepository) {
     var customerAddress by remember { mutableStateOf("") }
     var customerMapsLink by remember { mutableStateOf("") }
     var customerLocLabel by remember { mutableStateOf("Home") }
+    var addingLocationForId by remember { mutableStateOf<Long?>(null) }
+    var extraLocLabel by remember { mutableStateOf("") }
+    var extraLocMaps by remember { mutableStateOf("") }
+    var extraLocAddress by remember { mutableStateOf("") }
     var boreName by remember { mutableStateOf("Main Bore") }
     var boreAddress by remember { mutableStateOf("") }
     var boreLat by remember { mutableStateOf("17.3850") }
@@ -75,10 +81,10 @@ fun FleetHub(repo: TankerRepository) {
 
     fun refresh() {
         scope.launch {
-            repo.safe { tankers() }.onSuccess { tankers = it }
-            repo.safe { drivers() }.onSuccess { drivers = it }
-            repo.safe { managers() }.onSuccess { managers = it }
-            repo.safe { customers() }.onSuccess { customers = it }
+            repo.safe { tankers() }.onSuccess { tankers = it }.onFailure { msg = it.message }
+            repo.safe { drivers() }.onSuccess { drivers = it }.onFailure { msg = it.message }
+            repo.safe { managers() }.onSuccess { managers = it }.onFailure { msg = it.message }
+            repo.safe { customers() }.onSuccess { customers = it }.onFailure { msg = it.message }
         }
     }
 
@@ -199,15 +205,16 @@ fun FleetHub(repo: TankerRepository) {
             3 -> {
                 SoftField(customerName, { customerName = it }, "Customer name")
                 SoftField(customerPhone, { customerPhone = it }, "Customer phone")
-                SoftField(customerLocLabel, { customerLocLabel = it }, "Location label (Home / Office / Site)")
-                SoftField(customerAddress, { customerAddress = it }, "Address / landmark")
-                SoftField(customerMapsLink, { customerMapsLink = it }, "Google Maps link from customer")
+                SoftField(customerLocLabel, { customerLocLabel = it }, "Location shortcut (Home / Office / Site)")
+                SoftField(customerAddress, { customerAddress = it }, "Address / landmark (optional)")
+                SoftField(customerMapsLink, { customerMapsLink = it }, "Google Maps link (short or full)")
                 Text(
-                    "Ask customer to WhatsApp Google Maps → Share → Copy link. Same phone can have many sites.",
+                    "Paste WhatsApp Maps share link — short links (maps.app.goo.gl) work. " +
+                        "Register once, then add more sites per customer below.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
-                PrimaryButton("Save customer + location", onClick = {
+                PrimaryButton("Save customer + first location", onClick = {
                     scope.launch {
                         repo.safe {
                             upsertCustomer(
@@ -242,6 +249,45 @@ fun FleetHub(repo: TankerRepository) {
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
+                            }
+                            if (addingLocationForId == c.id) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                SoftField(extraLocLabel, { extraLocLabel = it }, "New location shortcut name")
+                                SoftField(extraLocAddress, { extraLocAddress = it }, "Landmark (optional)")
+                                SoftField(extraLocMaps, { extraLocMaps = it }, "Google Maps link")
+                                PrimaryButton("Add this location", onClick = {
+                                    if (extraLocMaps.isBlank()) {
+                                        msg = "Maps link required for new location"
+                                        return@PrimaryButton
+                                    }
+                                    scope.launch {
+                                        repo.safe {
+                                            addCustomerLocation(
+                                                c.id,
+                                                CustomerLocationRequest(
+                                                    label = extraLocLabel.trim().ifBlank { "Delivery" },
+                                                    address = extraLocAddress.trim().ifBlank { null },
+                                                    mapsLink = extraLocMaps.trim()
+                                                )
+                                            )
+                                        }.onSuccess {
+                                            addingLocationForId = null
+                                            extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""
+                                            refresh(); msg = "Location added — available when booking trips"
+                                        }.onFailure { msg = it.message }
+                                    }
+                                })
+                                TextButton(onClick = {
+                                    addingLocationForId = null
+                                    extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""
+                                }) { Text("Cancel") }
+                            } else {
+                                TextButton(onClick = {
+                                    addingLocationForId = c.id
+                                    extraLocLabel = ""
+                                    extraLocMaps = ""
+                                    extraLocAddress = ""
+                                }) { Text("+ Add another location") }
                             }
                         }
                     }

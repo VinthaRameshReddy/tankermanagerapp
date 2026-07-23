@@ -59,11 +59,13 @@ public class FleetService {
                 .stream().map(this::toTanker).collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public List<DriverResponse> listDrivers() {
         return driverRepository.findByOperatorIdAndActiveTrue(SecurityUtils.requireOperatorId())
                 .stream().map(this::toDriver).collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public List<DriverResponse> availableDrivers() {
         return driverRepository.findByOperatorIdAndAvailableTrueAndActiveTrue(SecurityUtils.requireOperatorId())
                 .stream().map(this::toDriver).collect(Collectors.toList());
@@ -317,11 +319,13 @@ public class FleetService {
         return toSalary(salaryRepository.save(salary));
     }
 
+    @Transactional(readOnly = true)
     public List<SalaryResponse> listSalaries() {
         return salaryRepository.findByOperatorIdOrderBySalaryMonthDesc(SecurityUtils.requireOperatorId())
                 .stream().map(this::toSalary).collect(Collectors.toList());
     }
 
+    @Transactional(readOnly = true)
     public DashboardResponse dashboard() {
         Long operatorId = SecurityUtils.requireOperatorId();
         List<Tanker> tankers = tankerRepository.findByOperatorIdAndActiveTrue(operatorId);

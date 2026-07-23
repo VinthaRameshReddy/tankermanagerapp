@@ -27,13 +27,18 @@ import androidx.compose.material.icons.rounded.LocalShipping
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Route
 import androidx.compose.material.icons.rounded.WaterDrop
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuAnchorType
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -360,10 +365,13 @@ private fun BookTripSheet(
     var driverId by remember { mutableStateOf<Long?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
+    var customerMenuOpen by remember { mutableStateOf(false) }
+    var locationMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
 
     val selectedCustomer = customers.firstOrNull { it.id == selectedCustomerId }
     val locations = selectedCustomer?.locations.orEmpty()
+    val selectedLocation = locations.firstOrNull { it.id == selectedLocationId }
 
     LaunchedEffect(Unit) {
         repo.safe { customers() }.onSuccess {
@@ -378,9 +386,20 @@ private fun BookTripSheet(
             tankers = it.filter { t -> t.status == "AVAILABLE" }
             tankerId = tankers.firstOrNull()?.id
         }
-        repo.safe { availableDrivers() }.onSuccess {
-            drivers = it
-            driverId = it.firstOrNull()?.id
+        val available = repo.safe { availableDrivers() }
+        if (available.isSuccess) {
+            drivers = available.getOrDefault(emptyList())
+            driverId = drivers.firstOrNull()?.id
+        } else {
+            val all = repo.safe { drivers() }
+            if (all.isSuccess) {
+                drivers = all.getOrDefault(emptyList()).filter { d -> d.available != false }
+                driverId = drivers.firstOrNull()?.id
+            } else {
+                error = available.exceptionOrNull()?.message
+                    ?: all.exceptionOrNull()?.message
+                    ?: "Could not load drivers"
+            }
         }
     }
 
@@ -398,26 +417,45 @@ private fun BookTripSheet(
             ) {
                 Text("Book a trip", style = MaterialTheme.typography.headlineMedium)
                 Text(
-                    "Pick customer → choose delivery site. Same phone can have many locations.",
+                    "Select customer → pick their saved location from the dropdown. Driver gets Navigate.",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 ErrorBanner(error)
 
                 Text("Customer", fontWeight = FontWeight.SemiBold)
-                customers.take(12).forEach { c ->
-                    FilterChip(
-                        selected = selectedCustomerId == c.id,
-                        onClick = {
-                            selectedCustomerId = c.id
-                            phone = c.phone.orEmpty()
-                            name = c.name.orEmpty()
-                            val first = c.locations.orEmpty().firstOrNull()
-                            selectedLocationId = first?.id
-                            address = first?.address.orEmpty()
-                            mapsLink = ""
-                        },
-                        label = { Text("${c.name} (${c.phone})") }
+                ExposedDropdownMenuBox(
+                    expanded = customerMenuOpen,
+                    onExpandedChange = { customerMenuOpen = it }
+                ) {
+                    OutlinedTextField(
+                        value = selectedCustomer?.let { "${it.name} (${it.phone})" } ?: "Select customer",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = customerMenuOpen) },
+                        modifier = Modifier
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                            .fillMaxWidth()
                     )
+                    ExposedDropdownMenu(
+                        expanded = customerMenuOpen,
+                        onDismissRequest = { customerMenuOpen = false }
+                    ) {
+                        customers.forEach { c ->
+                            DropdownMenuItem(
+                                text = { Text("${c.name} (${c.phone})") },
+                                onClick = {
+                                    selectedCustomerId = c.id
+                                    phone = c.phone.orEmpty()
+                                    name = c.name.orEmpty()
+                                    val first = c.locations.orEmpty().firstOrNull()
+                                    selectedLocationId = first?.id
+                                    address = first?.address.orEmpty()
+                                    mapsLink = ""
+                                    customerMenuOpen = false
+                                }
+                            )
+                        }
+                    }
                 }
 
                 SoftField(phone, {
@@ -430,28 +468,48 @@ private fun BookTripSheet(
                 Text("Delivery location", fontWeight = FontWeight.SemiBold)
                 if (locations.isEmpty()) {
                     Text(
-                        "No saved sites — paste Maps link below or register location in Fleet → Customers.",
+                        "No saved sites — paste Maps link below or add location in Fleet → Customers.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 } else {
-                    locations.forEach { loc ->
-                        FilterChip(
-                            selected = selectedLocationId == loc.id,
-                            onClick = {
-                                selectedLocationId = loc.id
-                                address = loc.address.orEmpty()
-                                mapsLink = ""
-                            },
-                            label = { Text(loc.label ?: loc.address ?: "Site") }
+                    ExposedDropdownMenuBox(
+                        expanded = locationMenuOpen,
+                        onExpandedChange = { locationMenuOpen = it }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedLocation?.let { "${it.label ?: "Site"} — ${it.address.orEmpty()}" }
+                                ?: "Select delivery location",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = locationMenuOpen) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth()
                         )
+                        ExposedDropdownMenu(
+                            expanded = locationMenuOpen,
+                            onDismissRequest = { locationMenuOpen = false }
+                        ) {
+                            locations.forEach { loc ->
+                                DropdownMenuItem(
+                                    text = { Text("${loc.label ?: "Site"} — ${loc.address.orEmpty()}") },
+                                    onClick = {
+                                        selectedLocationId = loc.id
+                                        address = loc.address.orEmpty()
+                                        mapsLink = ""
+                                        locationMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
                 SoftField(address, { address = it }, "Drop address / landmark")
                 SoftField(mapsLink, {
                     mapsLink = it
                     if (it.isNotBlank()) selectedLocationId = null
-                }, "Or paste new Google Maps link")
+                }, "Or paste new Google Maps link (short OK)")
 
                 Text("Select tanker", fontWeight = FontWeight.SemiBold)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
@@ -537,8 +595,8 @@ private fun FleetTab(repo: TankerRepository) {
 
     fun refresh() {
         scope.launch {
-            repo.safe { tankers() }.onSuccess { tankers = it }
-            repo.safe { drivers() }.onSuccess { drivers = it }
+            repo.safe { tankers() }.onSuccess { tankers = it }.onFailure { msg = it.message }
+            repo.safe { drivers() }.onSuccess { drivers = it }.onFailure { msg = it.message }
         }
     }
 
@@ -587,30 +645,42 @@ private fun FleetTab(repo: TankerRepository) {
                 }
             }
             1 -> {
-                SoftField(driverName, { driverName = it }, "Driver name")
-                SoftField(driverPhone, { driverPhone = it }, "Driver phone")
-                SoftField(driverPass, { driverPass = it }, "Login password", password = true)
-                PrimaryButton("Add driver", onClick = {
-                    scope.launch {
-                        repo.safe {
-                            createStaff(
-                                CreateStaffRequest(
-                                    fullName = driverName.trim(),
-                                    phone = driverPhone.trim(),
-                                    password = driverPass,
-                                    role = "DRIVER",
-                                    monthlySalary = 15000.0
+                val role by repo.session().role.collectAsState(initial = "")
+                val isOwner = role == "OWNER"
+                if (isOwner) {
+                    SoftField(driverName, { driverName = it }, "Driver name")
+                    SoftField(driverPhone, { driverPhone = it }, "Driver phone")
+                    SoftField(driverPass, { driverPass = it }, "Login password", password = true)
+                    PrimaryButton("Add driver", onClick = {
+                        scope.launch {
+                            repo.safe {
+                                createStaff(
+                                    CreateStaffRequest(
+                                        fullName = driverName.trim(),
+                                        phone = driverPhone.trim(),
+                                        password = driverPass,
+                                        role = "DRIVER",
+                                        monthlySalary = 15000.0
+                                    )
                                 )
-                            )
-                        }.onSuccess {
-                            driverName = ""
-                            driverPhone = ""
-                            refresh()
-                            msg = "Driver created — they can login with phone + password"
-                        }.onFailure { msg = it.message }
-                    }
-                })
+                            }.onSuccess {
+                                driverName = ""
+                                driverPhone = ""
+                                refresh()
+                                msg = "Driver created — they can login with phone + password"
+                            }.onFailure { msg = it.message }
+                        }
+                    })
+                } else {
+                    Text(
+                        "Only the owner can create drivers. Ask owner, or open Fleet hub as owner.",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
                 Spacer(modifier = Modifier.height(12.dp))
+                if (drivers.isEmpty()) {
+                    Text("No drivers yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                }
                 LazyColumn(
                     modifier = Modifier.weight(1f),
                     verticalArrangement = Arrangement.spacedBy(10.dp)

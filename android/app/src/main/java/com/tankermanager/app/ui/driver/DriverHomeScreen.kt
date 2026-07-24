@@ -2,23 +2,33 @@ package com.tankermanager.app.ui.driver
 
 import android.Manifest
 import android.annotation.SuppressLint
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.location.Location
 import android.location.LocationManager
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.LocalShipping
+import androidx.compose.material.icons.rounded.Navigation
+import androidx.compose.material.icons.rounded.WaterDrop
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -30,6 +40,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
@@ -40,18 +51,16 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.tankermanager.app.data.model.LocationUpdateRequest
 import com.tankermanager.app.data.model.TripResponse
-import com.tankermanager.app.data.model.UpdateTripStatusRequest
 import com.tankermanager.app.data.repo.TankerRepository
 import com.tankermanager.app.ui.components.EmptyState
 import com.tankermanager.app.ui.components.ErrorBanner
 import com.tankermanager.app.ui.components.GlassCard
 import com.tankermanager.app.ui.components.PrimaryButton
-import com.tankermanager.app.ui.components.PulsingTruck
 import com.tankermanager.app.ui.components.StatusPill
 import com.tankermanager.app.ui.components.friendlyStatus
-import com.tankermanager.app.ui.components.nextStatus
 import com.tankermanager.app.ui.theme.Lagoon
 import com.tankermanager.app.ui.theme.LagoonDeep
+import com.tankermanager.app.ui.theme.Sun
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -61,21 +70,23 @@ fun DriverHomeScreen(repo: TankerRepository, onLogout: () -> Unit) {
     var trips by remember { mutableStateOf<List<TripResponse>>(emptyList()) }
     var selected by remember { mutableStateOf<TripResponse?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
-    var sharing by remember { mutableStateOf(false) }
+    var liveHint by remember { mutableStateOf("Live GPS sharing is on for active trips") }
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
 
     val permissionLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { /* granted checked on share */ }
+    ) { }
 
     fun refresh() {
         scope.launch {
             repo.safe { driverActiveTrips() }
                 .onSuccess {
                     trips = it
-                    if (selected == null) selected = it.firstOrNull()
-                    else selected = it.find { t -> t.id == selected?.id } ?: it.firstOrNull()
+                    selected = when {
+                        selected == null -> it.firstOrNull()
+                        else -> it.find { t -> t.id == selected?.id } ?: it.firstOrNull()
+                    }
                 }
                 .onFailure { error = it.message }
         }
@@ -91,107 +102,149 @@ fun DriverHomeScreen(repo: TankerRepository, onLogout: () -> Unit) {
         refresh()
     }
 
-    LaunchedEffect(sharing, selected?.id) {
+    // Auto live sharing whenever there is an active trip — no manual toggle.
+    LaunchedEffect(selected?.id, trips.map { it.id to it.status }) {
         val trip = selected ?: return@LaunchedEffect
-        while (sharing && trip.status !in listOf("COMPLETED", "CANCELLED")) {
+        if (trip.status in listOf("COMPLETED", "CANCELLED")) return@LaunchedEffect
+        liveHint = "Sharing live location · status updates automatically"
+        while (true) {
+            val current = selected ?: break
+            if (current.status in listOf("COMPLETED", "CANCELLED")) break
             val loc = currentLocation(context)
             if (loc != null) {
                 repo.safe {
                     updateLocation(
-                        trip.id,
+                        current.id,
                         LocationUpdateRequest(loc.latitude, loc.longitude, loc.speed * 3.6f)
                     )
+                }.onSuccess { updated ->
+                    selected = updated
+                    // Refresh list so next trip appears after auto-complete
+                    if (updated.status in listOf("COMPLETED", "CANCELLED")) {
+                        refresh()
+                    } else {
+                        trips = trips.map { if (it.id == updated.id) updated else it }
+                    }
                 }
             }
             delay(8000)
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+    Column(modifier = Modifier.fillMaxSize().background(Color(0xFFF3FAF8))) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(RoundedCornerShape(bottomStart = 28.dp, bottomEnd = 28.dp))
-                .background(Brush.verticalGradient(listOf(LagoonDeep, Lagoon)))
+                .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+                .background(
+                    Brush.verticalGradient(
+                        listOf(Color(0xFF0B3D4A), LagoonDeep, Lagoon)
+                    )
+                )
                 .padding(20.dp)
         ) {
             Column {
-                TextButton(onClick = onLogout) { Text("Logout", color = Color.White) }
-                PulsingTruck()
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        "Driver cabin",
+                        color = Color.White.copy(alpha = 0.85f),
+                        style = MaterialTheme.typography.labelLarge
+                    )
+                    TextButton(onClick = onLogout) { Text("Logout", color = Color.White) }
+                }
                 Spacer(modifier = Modifier.height(8.dp))
-                Text("Hey ${name ?: "Driver"}", color = Color.White, style = MaterialTheme.typography.headlineMedium)
-                Text("Your assigned water runs", color = Color.White.copy(alpha = 0.9f))
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .size(56.dp)
+                            .clip(CircleShape)
+                            .background(Color.White.copy(alpha = 0.18f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Rounded.LocalShipping, contentDescription = null, tint = Color.White, modifier = Modifier.size(30.dp))
+                    }
+                    Column {
+                        Text("Hey ${name ?: "Driver"}", color = Color.White, style = MaterialTheme.typography.headlineMedium)
+                        Text(liveHint, color = Color.White.copy(alpha = 0.9f), style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
             }
         }
 
-        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(16.dp).weight(1f), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             ErrorBanner(error)
             if (trips.isEmpty()) {
                 EmptyState("No active trips. Relax — new jobs will appear here.")
             } else {
                 LazyColumn(verticalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.weight(1f, false)) {
                     items(trips, key = { it.id }) { trip ->
+                        val selectedCard = selected?.id == trip.id
                         GlassCard(onClick = { selected = trip }) {
-                            Text(trip.tripCode ?: "", fontWeight = FontWeight.Bold)
-                            StatusPill(trip.status)
-                            Text("${trip.customerName} • ${trip.customerPhone}")
-                            Text(trip.dropAddress ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(trip.tripCode ?: "", fontWeight = FontWeight.Bold)
+                                    Text("${trip.customerName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                                StatusPill(trip.status)
+                            }
+                            if (selectedCard) {
+                                Text("Current focus", color = LagoonDeep, fontWeight = FontWeight.SemiBold)
+                            }
                         }
                     }
                 }
 
                 selected?.let { trip ->
-                    val context = androidx.compose.ui.platform.LocalContext.current
                     GlassCard {
-                        Text("Current job", fontWeight = FontWeight.Bold)
-                        Text(friendlyStatus(trip.status), color = LagoonDeep, style = MaterialTheme.typography.titleLarge)
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Icon(Icons.Rounded.WaterDrop, contentDescription = null, tint = LagoonDeep)
+                            Text(friendlyStatus(trip.status), color = LagoonDeep, style = MaterialTheme.typography.titleLarge)
+                        }
                         Text("Bore: ${trip.boreName}")
                         Text("Drop: ${trip.dropAddress}")
-                        if (trip.distanceKm != null) {
-                            Text("Distance ~ ${trip.distanceKm} km", fontWeight = FontWeight.SemiBold)
+                        Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                            if (trip.distanceKm != null) {
+                                Text("~${trip.distanceKm} km", fontWeight = FontWeight.SemiBold)
+                            }
+                            if (trip.etaMinutes != null) {
+                                Text("ETA ${trip.etaMinutes} min", color = Sun, fontWeight = FontWeight.Bold)
+                            }
                         }
-                        if (trip.etaMinutes != null) {
-                            Text("ETA ~ ${trip.etaMinutes} min")
-                        }
+                        Text(
+                            "Status updates automatically from your GPS near bore / drop.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                         Spacer(modifier = Modifier.height(8.dp))
                         if (!trip.mapsNavigateUrl.isNullOrBlank()) {
-                            PrimaryButton("Navigate to drop (Maps)", onClick = {
+                            val label = if (trip.status in listOf("ASSIGNED", "GOING_FOR_LOADING", "LOADING")) {
+                                "Navigate to bore"
+                            } else {
+                                "Navigate to drop"
+                            }
+                            PrimaryButton(label, onClick = {
                                 try {
                                     context.startActivity(
-                                        android.content.Intent(
-                                            android.content.Intent.ACTION_VIEW,
-                                            android.net.Uri.parse(trip.mapsNavigateUrl)
-                                        )
+                                        Intent(Intent.ACTION_VIEW, Uri.parse(trip.mapsNavigateUrl))
                                     )
                                 } catch (_: Exception) {
                                     error = "Could not open Maps"
                                 }
                             })
-                            Spacer(modifier = Modifier.height(8.dp))
                         }
-                        val next = nextStatus(trip.status)
-                        if (next != null) {
-                            PrimaryButton("Update → ${friendlyStatus(next)}", onClick = {
-                                scope.launch {
-                                    repo.safe {
-                                        driverUpdateStatus(trip.id, UpdateTripStatusRequest(next))
-                                    }.onSuccess {
-                                        selected = it
-                                        refresh()
-                                        if (next == "EN_ROUTE" || next == "GOING_FOR_LOADING") {
-                                            sharing = true
-                                        }
-                                        if (next == "COMPLETED") sharing = false
-                                    }.onFailure { error = it.message }
-                                }
-                            })
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Icon(Icons.Rounded.Navigation, contentDescription = null, tint = Lagoon, modifier = Modifier.size(18.dp))
+                            Text("Live sharing ON", color = LagoonDeep, fontWeight = FontWeight.SemiBold)
                         }
-                        Spacer(modifier = Modifier.height(8.dp))
-                        PrimaryButton(
-                            text = if (sharing) "Sharing live location ✓" else "Start sharing location",
-                            onClick = { sharing = !sharing },
-                            enabled = trip.status !in listOf("COMPLETED", "CANCELLED")
-                        )
                     }
                 }
             }

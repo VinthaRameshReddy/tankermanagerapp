@@ -100,7 +100,8 @@ data class CustomerLocationResponse(
     val address: String?,
     val latitude: Double?,
     val longitude: Double?,
-    val mapsLink: String?
+    val mapsLink: String?,
+    val tripRate: Double? = null
 )
 
 data class CustomerLocationRequest(
@@ -108,7 +109,8 @@ data class CustomerLocationRequest(
     val address: String? = null,
     val mapsLink: String? = null,
     val latitude: Double? = null,
-    val longitude: Double? = null
+    val longitude: Double? = null,
+    val tripRate: Double? = null
 )
 
 data class CustomerResponse(
@@ -159,6 +161,7 @@ data class BookTripRequest(
     val dropLat: Double? = null,
     val dropLng: Double? = null,
     val mapsLink: String? = null,
+    val tripAmount: Double? = null,
     val notes: String? = null
 )
 
@@ -176,6 +179,8 @@ data class TripResponse(
     val status: String?,
     val customerName: String?,
     val customerPhone: String?,
+    val customerId: Long? = null,
+    val customerLocationId: Long? = null,
     val tankerNumber: String?,
     val driverId: Long?,
     val driverName: String?,
@@ -189,6 +194,9 @@ data class TripResponse(
     val etaMinutes: Int?,
     val distanceKm: Double? = null,
     val mapsNavigateUrl: String? = null,
+    val tripAmount: Double? = null,
+    val amountPaid: Double? = null,
+    val amountDue: Double? = null,
     val trackingToken: String?,
     val trackingEnabled: Boolean?,
     val assignedAt: String?,
@@ -196,6 +204,31 @@ data class TripResponse(
     val completedAt: String?,
     val notes: String?,
     val history: List<StatusHistoryItem>? = null
+)
+
+data class TripPaymentRequest(
+    val amount: Double,
+    val note: String? = null
+)
+
+data class TripDueItem(
+    val tripId: Long?,
+    val tripCode: String?,
+    val dropAddress: String?,
+    val status: String?,
+    val tripAmount: Double?,
+    val amountPaid: Double?,
+    val amountDue: Double?
+)
+
+data class CustomerDuesResponse(
+    val customerId: Long?,
+    val customerName: String?,
+    val customerPhone: String?,
+    val totalBilled: Double?,
+    val totalPaid: Double?,
+    val totalDue: Double?,
+    val trips: List<TripDueItem>? = null
 )
 
 data class UpdateTripStatusRequest(val status: String, val note: String? = null)

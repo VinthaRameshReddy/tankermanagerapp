@@ -31,6 +31,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.tankermanager.app.data.model.TripPaymentRequest
 import com.tankermanager.app.data.model.TripResponse
 import com.tankermanager.app.data.model.UpdateTripStatusRequest
 import com.tankermanager.app.data.repo.TankerRepository
@@ -39,6 +40,7 @@ import com.tankermanager.app.ui.components.ErrorBanner
 import com.tankermanager.app.ui.components.GlassCard
 import com.tankermanager.app.ui.components.PrimaryButton
 import com.tankermanager.app.ui.components.ScreenScaffold
+import com.tankermanager.app.ui.components.SoftField
 import com.tankermanager.app.ui.components.StatusPill
 import com.tankermanager.app.ui.components.friendlyStatus
 import com.tankermanager.app.ui.components.nextStatus
@@ -57,6 +59,8 @@ fun TripDetailScreen(
     var trip by remember { mutableStateOf<TripResponse?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
+    var payAmount by remember { mutableStateOf("") }
+    var payMsg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
     fun load() {
@@ -80,6 +84,7 @@ fun TripDetailScreen(
         }
     ) {
         ErrorBanner(error)
+        ErrorBanner(payMsg)
         if (t == null) {
             Text("Loading…")
             return@ScreenScaffold
@@ -112,9 +117,43 @@ fun TripDetailScreen(
                 }
             }
 
+            GlassCard {
+                Text("Payment for this trip", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                Text("Fare ₹${"%.0f".format(t.tripAmount ?: 0.0)}")
+                Text("Paid ₹${"%.0f".format(t.amountPaid ?: 0.0)}")
+                Text(
+                    "Due ₹${"%.0f".format(t.amountDue ?: 0.0)}",
+                    fontWeight = FontWeight.Bold,
+                    color = if ((t.amountDue ?: 0.0) > 0) MaterialTheme.colorScheme.error else Success
+                )
+                SoftField(payAmount, { payAmount = it }, "Collect payment ₹")
+                PrimaryButton("Record payment", loading = loading, onClick = {
+                    val amt = payAmount.toDoubleOrNull()
+                    if (amt == null || amt <= 0) {
+                        payMsg = "Enter a valid payment amount"
+                        return@PrimaryButton
+                    }
+                    loading = true
+                    payMsg = null
+                    scope.launch {
+                        repo.safe { recordTripPayment(tripId, TripPaymentRequest(amt)) }
+                            .onSuccess {
+                                trip = it
+                                payAmount = ""
+                                payMsg = "Payment recorded"
+                                loading = false
+                            }
+                            .onFailure {
+                                payMsg = it.message
+                                loading = false
+                            }
+                    }
+                })
+            }
+
             val context = androidx.compose.ui.platform.LocalContext.current
             if (!t.mapsNavigateUrl.isNullOrBlank()) {
-                PrimaryButton("Open drop on Google Maps", onClick = {
+                PrimaryButton("Open on Google Maps", onClick = {
                     try {
                         val intent = android.content.Intent(
                             android.content.Intent.ACTION_VIEW,

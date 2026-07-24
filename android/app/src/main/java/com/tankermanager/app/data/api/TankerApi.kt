@@ -59,6 +59,16 @@ interface TankerApi {
         @Body body: CustomerLocationRequest
     ): CustomerLocationResponse
 
+    @PATCH("api/manager/customers/{id}/locations/{locationId}")
+    suspend fun updateCustomerLocation(
+        @Path("id") id: Long,
+        @Path("locationId") locationId: Long,
+        @Body body: CustomerLocationRequest
+    ): CustomerLocationResponse
+
+    @GET("api/manager/customers/{id}/dues")
+    suspend fun customerDues(@Path("id") id: Long): CustomerDuesResponse
+
     @GET("api/manager/bores")
     suspend fun bores(): List<BoreResponse>
 
@@ -78,6 +88,12 @@ interface TankerApi {
     suspend fun managerUpdateStatus(
         @Path("id") id: Long,
         @Body body: UpdateTripStatusRequest
+    ): TripResponse
+
+    @POST("api/manager/trips/{id}/payments")
+    suspend fun recordTripPayment(
+        @Path("id") id: Long,
+        @Body body: TripPaymentRequest
     ): TripResponse
 
     @GET("api/manager/expenses")
@@ -114,7 +130,7 @@ interface TankerApi {
     suspend fun updateLocation(
         @Path("id") id: Long,
         @Body body: LocationUpdateRequest
-    )
+    ): TripResponse
 
     @GET("api/public/track/{token}")
     suspend fun track(@Path("token") token: String): TrackingResponse

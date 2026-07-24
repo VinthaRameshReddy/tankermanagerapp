@@ -1,5 +1,6 @@
 package com.tankermanager.app.ui.manager
 
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -8,6 +9,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -67,17 +69,19 @@ fun FleetHub(repo: TankerRepository) {
     var customerAddress by remember { mutableStateOf("") }
     var customerMapsLink by remember { mutableStateOf("") }
     var customerLocLabel by remember { mutableStateOf("Home") }
+    var customerTripRate by remember { mutableStateOf("") }
     var addingLocationForId by remember { mutableStateOf<Long?>(null) }
     var extraLocLabel by remember { mutableStateOf("") }
     var extraLocMaps by remember { mutableStateOf("") }
     var extraLocAddress by remember { mutableStateOf("") }
+    var extraLocRate by remember { mutableStateOf("") }
     var boreName by remember { mutableStateOf("Main Bore") }
     var boreAddress by remember { mutableStateOf("") }
     var boreLat by remember { mutableStateOf("17.3850") }
     var boreLng by remember { mutableStateOf("78.4867") }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
-    val tabs = listOf("Tankers", "Drivers", "Managers", "Customers", "Bore")
+    val tabs = listOf("Tankers", "Bore", "Drivers", "Managers", "Customers")
 
     fun refresh() {
         scope.launch {
@@ -92,10 +96,16 @@ fun FleetHub(repo: TankerRepository) {
 
     ScreenScaffold(
         title = "Fleet",
-        subtitle = if (isOwner) "Owner: create managers, drivers & customers"
-        else "Manager: add customers and run trips"
+        subtitle = if (isOwner) "Owner: tankers, drivers, managers, customers & bore"
+        else "Manager: customers, trips & bore"
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        // Bore is the 5th chip — must scroll on narrow phones or it is clipped off-screen.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             tabs.forEachIndexed { i, label ->
                 FilterChip(selected = section == i, onClick = { section = i }, label = { Text(label) })
             }
@@ -130,6 +140,29 @@ fun FleetHub(repo: TankerRepository) {
                 }
             }
             1 -> {
+                SoftField(boreName, { boreName = it }, "Bore name")
+                SoftField(boreAddress, { boreAddress = it }, "Bore address")
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SoftField(boreLat, { boreLat = it }, "Lat", modifier = Modifier.weight(1f))
+                    SoftField(boreLng, { boreLng = it }, "Lng", modifier = Modifier.weight(1f))
+                }
+                PrimaryButton("Save primary bore", onClick = {
+                    scope.launch {
+                        repo.safe {
+                            addBore(
+                                BoreRequest(
+                                    name = boreName,
+                                    address = boreAddress.ifBlank { "Bore yard" },
+                                    latitude = boreLat.toDoubleOrNull() ?: 17.385,
+                                    longitude = boreLng.toDoubleOrNull() ?: 78.4867,
+                                    primaryBore = true
+                                )
+                            )
+                        }.onSuccess { msg = "Bore saved" }.onFailure { msg = it.message }
+                    }
+                })
+            }
+            2 -> {
                 if (isOwner) {
                     SoftField(staffName, { staffName = it }, "Driver name")
                     SoftField(staffPhone, { staffPhone = it }, "Driver phone")
@@ -167,7 +200,7 @@ fun FleetHub(repo: TankerRepository) {
                     }
                 }
             }
-            2 -> {
+            3 -> {
                 if (isOwner) {
                     SoftField(staffName, { staffName = it }, "Manager name")
                     SoftField(staffPhone, { staffPhone = it }, "Manager phone")
@@ -202,15 +235,16 @@ fun FleetHub(repo: TankerRepository) {
                     }
                 }
             }
-            3 -> {
+            else -> {
                 SoftField(customerName, { customerName = it }, "Customer name")
                 SoftField(customerPhone, { customerPhone = it }, "Customer phone")
                 SoftField(customerLocLabel, { customerLocLabel = it }, "Location shortcut (Home / Office / Site)")
+                SoftField(customerTripRate, { customerTripRate = it }, "Trip rate ₹ for this location")
                 SoftField(customerAddress, { customerAddress = it }, "Address / landmark (optional)")
                 SoftField(customerMapsLink, { customerMapsLink = it }, "Google Maps link (short or full)")
                 Text(
-                    "Paste WhatsApp Maps share link — short links (maps.app.goo.gl) work. " +
-                        "Register once, then add more sites per customer below.",
+                    "Paste WhatsApp Maps share link — short links work. Rate is per drop location; " +
+                        "changing rate later only affects new trips.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
@@ -226,9 +260,20 @@ fun FleetHub(repo: TankerRepository) {
                                     locationLabel = customerLocLabel.trim().ifBlank { "Delivery" }
                                 )
                             )
-                        }.onSuccess {
+                        }.onSuccess { saved ->
+                            val rate = customerTripRate.toDoubleOrNull()
+                            val locId = saved.locations?.firstOrNull()?.id
+                            if (rate != null && locId != null) {
+                                repo.safe {
+                                    updateCustomerLocation(
+                                        saved.id,
+                                        locId,
+                                        CustomerLocationRequest(tripRate = rate)
+                                    )
+                                }
+                            }
                             customerName = ""; customerPhone = ""; customerAddress = ""
-                            customerMapsLink = ""; customerLocLabel = "Home"
+                            customerMapsLink = ""; customerLocLabel = "Home"; customerTripRate = ""
                             refresh(); msg = "Customer & delivery location saved"
                         }.onFailure { msg = it.message }
                     }
@@ -245,7 +290,8 @@ fun FleetHub(repo: TankerRepository) {
                             } else {
                                 locs.forEach { loc ->
                                     Text(
-                                        "• ${loc.label}: ${loc.address}",
+                                        "• ${loc.label}: ${loc.address}" +
+                                            (loc.tripRate?.let { " · ₹${"%.0f".format(it)}/trip" } ?: ""),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
@@ -254,6 +300,7 @@ fun FleetHub(repo: TankerRepository) {
                                 Spacer(modifier = Modifier.height(8.dp))
                                 SoftField(extraLocLabel, { extraLocLabel = it }, "New location shortcut name")
                                 SoftField(extraLocAddress, { extraLocAddress = it }, "Landmark (optional)")
+                                SoftField(extraLocRate, { extraLocRate = it }, "Trip rate ₹")
                                 SoftField(extraLocMaps, { extraLocMaps = it }, "Google Maps link")
                                 PrimaryButton("Add this location", onClick = {
                                     if (extraLocMaps.isBlank()) {
@@ -267,19 +314,20 @@ fun FleetHub(repo: TankerRepository) {
                                                 CustomerLocationRequest(
                                                     label = extraLocLabel.trim().ifBlank { "Delivery" },
                                                     address = extraLocAddress.trim().ifBlank { null },
-                                                    mapsLink = extraLocMaps.trim()
+                                                    mapsLink = extraLocMaps.trim(),
+                                                    tripRate = extraLocRate.toDoubleOrNull()
                                                 )
                                             )
                                         }.onSuccess {
                                             addingLocationForId = null
-                                            extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""
+                                            extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""; extraLocRate = ""
                                             refresh(); msg = "Location added — available when booking trips"
                                         }.onFailure { msg = it.message }
                                     }
                                 })
                                 TextButton(onClick = {
                                     addingLocationForId = null
-                                    extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""
+                                    extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""; extraLocRate = ""
                                 }) { Text("Cancel") }
                             } else {
                                 TextButton(onClick = {
@@ -287,34 +335,12 @@ fun FleetHub(repo: TankerRepository) {
                                     extraLocLabel = ""
                                     extraLocMaps = ""
                                     extraLocAddress = ""
+                                    extraLocRate = ""
                                 }) { Text("+ Add another location") }
                             }
                         }
                     }
                 }
-            }
-            else -> {
-                SoftField(boreName, { boreName = it }, "Bore name")
-                SoftField(boreAddress, { boreAddress = it }, "Bore address")
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SoftField(boreLat, { boreLat = it }, "Lat", modifier = Modifier.weight(1f))
-                    SoftField(boreLng, { boreLng = it }, "Lng", modifier = Modifier.weight(1f))
-                }
-                PrimaryButton("Save primary bore", onClick = {
-                    scope.launch {
-                        repo.safe {
-                            addBore(
-                                BoreRequest(
-                                    name = boreName,
-                                    address = boreAddress.ifBlank { "Bore yard" },
-                                    latitude = boreLat.toDoubleOrNull() ?: 17.385,
-                                    longitude = boreLng.toDoubleOrNull() ?: 78.4867,
-                                    primaryBore = true
-                                )
-                            )
-                        }.onSuccess { msg = "Bore saved" }.onFailure { msg = it.message }
-                    }
-                })
             }
         }
     }

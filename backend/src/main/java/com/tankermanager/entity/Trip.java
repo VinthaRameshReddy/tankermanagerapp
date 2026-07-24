@@ -68,6 +68,24 @@ public class Trip {
     @Column(nullable = false, precision = 10, scale = 7)
     private BigDecimal dropLng;
 
+    /** Saved customer location used for this trip (optional). */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "customer_location_id")
+    private CustomerLocation customerLocation;
+
+    /**
+     * Agreed trip fare snapshotted at booking time from the location rate
+     * (or override). Rate changes later do not rewrite this.
+     */
+    @Column(precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal tripAmount = BigDecimal.ZERO;
+
+    /** Total payments recorded against this trip. */
+    @Column(precision = 12, scale = 2)
+    @Builder.Default
+    private BigDecimal amountPaid = BigDecimal.ZERO;
+
     /** Estimated minutes to arrival based on maps/traffic */
     private Integer etaMinutes;
 

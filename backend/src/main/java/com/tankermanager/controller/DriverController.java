@@ -4,7 +4,6 @@ import com.tankermanager.dto.ApiDtos.*;
 import com.tankermanager.service.TripService;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -32,8 +31,7 @@ public class DriverController {
     }
 
     @PostMapping("/trips/{id}/location")
-    @ResponseStatus(HttpStatus.NO_CONTENT)
-    public void updateLocation(@PathVariable Long id, @Valid @RequestBody LocationUpdateRequest request) {
-        tripService.updateLocation(id, request);
+    public TripResponse updateLocation(@PathVariable Long id, @Valid @RequestBody LocationUpdateRequest request) {
+        return tripService.updateLocation(id, request);
     }
 }

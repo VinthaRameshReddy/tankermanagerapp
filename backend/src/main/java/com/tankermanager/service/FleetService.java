@@ -181,6 +181,7 @@ public class FleetService {
                 .latitude(lat)
                 .longitude(lng)
                 .mapsLink(mapsLink != null ? mapsLink.trim() : null)
+                .tripRate(req.getTripRate())
                 .active(true)
                 .build());
 
@@ -191,6 +192,37 @@ public class FleetService {
         customerRepository.save(customer);
 
         return toLocation(loc);
+    }
+
+    @Transactional
+    public CustomerLocationResponse updateCustomerLocation(Long customerId, Long locationId, CustomerLocationRequest req) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        CustomerLocation loc = customerLocationRepository.findByIdAndCustomerOperatorId(locationId, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Location not found"));
+        if (!loc.getCustomer().getId().equals(customerId)) {
+            throw new BadRequestException("Location does not belong to this customer");
+        }
+        if (req.getLabel() != null && !req.getLabel().isBlank()) {
+            loc.setLabel(req.getLabel().trim());
+        }
+        if (req.getAddress() != null && !req.getAddress().isBlank()) {
+            loc.setAddress(req.getAddress().trim());
+        }
+        if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
+            var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
+            loc.setLatitude(coords.latitude());
+            loc.setLongitude(coords.longitude());
+            loc.setMapsLink(req.getMapsLink().trim());
+        }
+        if (req.getLatitude() != null && req.getLongitude() != null) {
+            loc.setLatitude(req.getLatitude());
+            loc.setLongitude(req.getLongitude());
+        }
+        if (req.getTripRate() != null) {
+            // Peak-season rate change — only NEW trips use this; past trips keep tripAmount.
+            loc.setTripRate(req.getTripRate());
+        }
+        return toLocation(customerLocationRepository.save(loc));
     }
 
     public List<CustomerLocationResponse> listCustomerLocations(Long customerId) {
@@ -399,6 +431,7 @@ public class FleetService {
                 .latitude(loc.getLatitude())
                 .longitude(loc.getLongitude())
                 .mapsLink(loc.getMapsLink())
+                .tripRate(loc.getTripRate())
                 .build();
     }
 

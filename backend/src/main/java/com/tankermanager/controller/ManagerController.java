@@ -86,6 +86,19 @@ public class ManagerController {
         return fleetService.addCustomerLocation(id, request);
     }
 
+    @PatchMapping("/customers/{id}/locations/{locationId}")
+    public CustomerLocationResponse updateCustomerLocation(
+            @PathVariable Long id,
+            @PathVariable Long locationId,
+            @RequestBody CustomerLocationRequest request) {
+        return fleetService.updateCustomerLocation(id, locationId, request);
+    }
+
+    @GetMapping("/customers/{id}/dues")
+    public CustomerDuesResponse customerDues(@PathVariable Long id) {
+        return tripService.customerDues(id);
+    }
+
     // Bores
     @PostMapping("/bores")
     @ResponseStatus(HttpStatus.CREATED)
@@ -118,6 +131,11 @@ public class ManagerController {
     @PatchMapping("/trips/{id}/status")
     public TripResponse updateStatus(@PathVariable Long id, @Valid @RequestBody UpdateTripStatusRequest request) {
         return tripService.updateStatus(id, request, false);
+    }
+
+    @PostMapping("/trips/{id}/payments")
+    public TripResponse recordPayment(@PathVariable Long id, @Valid @RequestBody TripPaymentRequest request) {
+        return tripService.recordPayment(id, request);
     }
 
     // Expenses

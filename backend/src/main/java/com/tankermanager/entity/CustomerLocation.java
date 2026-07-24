@@ -43,6 +43,13 @@ public class CustomerLocation {
     @Column(length = 1000)
     private String mapsLink;
 
+    /**
+     * Current per-trip rate for this drop location.
+     * Changing this only affects NEW trips; past trips keep their snapshotted tripAmount.
+     */
+    @Column(precision = 12, scale = 2)
+    private BigDecimal tripRate;
+
     @Builder.Default
     private boolean active = true;
 

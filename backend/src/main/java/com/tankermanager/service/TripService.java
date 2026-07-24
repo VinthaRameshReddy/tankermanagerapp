@@ -29,9 +29,15 @@ public class TripService {
             TripStatus.ASSIGNED, TripStatus.GOING_FOR_LOADING, TripStatus.LOADING,
             TripStatus.LOADING_COMPLETED, TripStatus.EN_ROUTE, TripStatus.ARRIVED, TripStatus.UNLOADING);
 
+    /** Arrive within ~180m */
+    private static final double ARRIVE_KM = 0.18;
+    /** Leave beyond ~300m */
+    private static final double LEAVE_KM = 0.30;
+
     private final TripRepository tripRepository;
     private final TripStatusHistoryRepository historyRepository;
     private final VehicleLocationRepository locationRepository;
+    private final TripPaymentRepository tripPaymentRepository;
     private final CustomerRepository customerRepository;
     private final CustomerLocationRepository customerLocationRepository;
     private final TankerRepository tankerRepository;
@@ -66,6 +72,8 @@ public class TripService {
         java.math.BigDecimal dropLng = req.getDropLng();
         String dropAddress = req.getDropAddress();
         Long locationId = req.getCustomerLocationId();
+        CustomerLocation savedLoc = null;
+        java.math.BigDecimal tripAmount = req.getTripAmount();
 
         if (locationId != null) {
             CustomerLocation loc = customerLocationRepository.findByIdAndCustomerOperatorId(locationId, operatorId)
@@ -76,6 +84,10 @@ public class TripService {
             dropLat = loc.getLatitude();
             dropLng = loc.getLongitude();
             dropAddress = loc.getAddress();
+            savedLoc = loc;
+            if (tripAmount == null && loc.getTripRate() != null) {
+                tripAmount = loc.getTripRate();
+            }
         } else if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
             var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
             dropLat = coords.latitude();
@@ -83,14 +95,14 @@ public class TripService {
             if (dropAddress == null || dropAddress.isBlank()) {
                 dropAddress = "Maps drop location";
             }
-            // Persist as a reusable location for this customer
-            customerLocationRepository.save(CustomerLocation.builder()
+            savedLoc = customerLocationRepository.save(CustomerLocation.builder()
                     .customer(customer)
                     .label("Trip drop")
                     .address(dropAddress)
                     .latitude(dropLat)
                     .longitude(dropLng)
                     .mapsLink(req.getMapsLink().trim())
+                    .tripRate(tripAmount)
                     .active(true)
                     .build());
         }
@@ -100,6 +112,9 @@ public class TripService {
         }
         if (dropAddress == null || dropAddress.isBlank()) {
             dropAddress = "Delivery point";
+        }
+        if (tripAmount == null) {
+            tripAmount = java.math.BigDecimal.ZERO;
         }
 
         customer.setDefaultAddress(dropAddress);
@@ -141,10 +156,13 @@ public class TripService {
                 .driver(driver)
                 .bore(bore)
                 .bookedBy(bookedBy)
+                .customerLocation(savedLoc)
                 .status(TripStatus.ASSIGNED)
                 .dropAddress(dropAddress)
                 .dropLat(dropLat)
                 .dropLng(dropLng)
+                .tripAmount(tripAmount)
+                .amountPaid(java.math.BigDecimal.ZERO)
                 .etaMinutes(eta)
                 .assignedAt(Instant.now())
                 .trackingToken(UUID.randomUUID().toString().replace("-", ""))
@@ -193,7 +211,12 @@ public class TripService {
             trip.setCompletedAt(Instant.now());
             trip.setTrackingEnabled(false);
             trip.getTanker().setStatus(TankerStatus.AVAILABLE);
-            trip.getDriver().setAvailable(true);
+            boolean otherActive = tripRepository
+                    .findByDriverIdAndStatusNotIn(trip.getDriver().getId(),
+                            List.of(TripStatus.COMPLETED, TripStatus.CANCELLED))
+                    .stream()
+                    .anyMatch(t -> !t.getId().equals(trip.getId()));
+            trip.getDriver().setAvailable(!otherActive);
             if (to == TripStatus.COMPLETED) {
                 Driver d = trip.getDriver();
                 d.setTotalTripsCompleted(d.getTotalTripsCompleted() + 1);
@@ -210,7 +233,7 @@ public class TripService {
     }
 
     @Transactional
-    public void updateLocation(Long tripId, LocationUpdateRequest req) {
+    public TripResponse updateLocation(Long tripId, LocationUpdateRequest req) {
         Trip trip = loadTripForActor(tripId, true);
         if (!ACTIVE.contains(trip.getStatus())) {
             throw new BadRequestException("Cannot update location for inactive trip");
@@ -230,11 +253,180 @@ public class TripService {
         tanker.setLastKnownLng(req.getLongitude());
         tankerRepository.save(tanker);
 
-        if (trip.getStatus() == TripStatus.EN_ROUTE || trip.getStatus() == TripStatus.LOADING_COMPLETED) {
-            int eta = etaService.estimateMinutes(req.getLatitude(), req.getLongitude(), trip.getDropLat(), trip.getDropLng());
+        // Dynamic ETA while heading to drop
+        if (trip.getStatus() == TripStatus.EN_ROUTE
+                || trip.getStatus() == TripStatus.LOADING_COMPLETED
+                || trip.getStatus() == TripStatus.GOING_FOR_LOADING) {
+            java.math.BigDecimal targetLat = trip.getStatus() == TripStatus.GOING_FOR_LOADING
+                    ? trip.getBore().getLatitude() : trip.getDropLat();
+            java.math.BigDecimal targetLng = trip.getStatus() == TripStatus.GOING_FOR_LOADING
+                    ? trip.getBore().getLongitude() : trip.getDropLng();
+            int eta = etaService.estimateMinutes(req.getLatitude(), req.getLongitude(), targetLat, targetLng);
             trip.setEtaMinutes(eta);
-            tripRepository.save(trip);
         }
+
+        applyGeofenceAutoStatus(trip, req.getLatitude(), req.getLongitude());
+        tripRepository.save(trip);
+        return toResponse(trip, false);
+    }
+
+    /**
+     * Auto-advance trip status from GPS relative to bore / drop points.
+     */
+    private void applyGeofenceAutoStatus(Trip trip, java.math.BigDecimal lat, java.math.BigDecimal lng) {
+        double toBore = etaService.distanceKm(lat, lng, trip.getBore().getLatitude(), trip.getBore().getLongitude());
+        double toDrop = etaService.distanceKm(lat, lng, trip.getDropLat(), trip.getDropLng());
+        TripStatus status = trip.getStatus();
+        UserAccount system = null;
+
+        if (status == TripStatus.ASSIGNED && toBore > ARRIVE_KM) {
+            advanceStatus(trip, TripStatus.GOING_FOR_LOADING, system, "Auto: heading to bore", false);
+            int eta = etaService.estimateMinutes(lat, lng, trip.getBore().getLatitude(), trip.getBore().getLongitude());
+            trip.setEtaMinutes(eta);
+            return;
+        }
+        if ((status == TripStatus.ASSIGNED || status == TripStatus.GOING_FOR_LOADING) && toBore <= ARRIVE_KM) {
+            advanceStatus(trip, TripStatus.LOADING, system, "Auto: arrived at bore for filling", true);
+            return;
+        }
+        if (status == TripStatus.LOADING && toBore > LEAVE_KM) {
+            advanceStatus(trip, TripStatus.LOADING_COMPLETED, system, "Auto: left bore after loading", false);
+            advanceStatus(trip, TripStatus.EN_ROUTE, system, "Auto: en route to customer", true);
+            int eta = etaService.estimateMinutes(lat, lng, trip.getDropLat(), trip.getDropLng());
+            trip.setEtaMinutes(eta);
+            if (trip.getStartedAt() == null) {
+                trip.setStartedAt(Instant.now());
+            }
+            return;
+        }
+        if (status == TripStatus.LOADING_COMPLETED && toBore > LEAVE_KM) {
+            advanceStatus(trip, TripStatus.EN_ROUTE, system, "Auto: en route to customer", true);
+            if (trip.getStartedAt() == null) {
+                trip.setStartedAt(Instant.now());
+            }
+            return;
+        }
+        if (status == TripStatus.EN_ROUTE && toDrop <= ARRIVE_KM) {
+            advanceStatus(trip, TripStatus.ARRIVED, system, "Auto: arrived at drop", true);
+            advanceStatus(trip, TripStatus.UNLOADING, system, "Auto: unloading", false);
+            trip.setEtaMinutes(0);
+            return;
+        }
+        if (status == TripStatus.ARRIVED && toDrop <= ARRIVE_KM) {
+            advanceStatus(trip, TripStatus.UNLOADING, system, "Auto: unloading", false);
+            return;
+        }
+        if (status == TripStatus.UNLOADING && toDrop > LEAVE_KM) {
+            advanceStatus(trip, TripStatus.COMPLETED, system, "Auto: left drop — trip completed", true);
+        }
+    }
+
+    private void advanceStatus(Trip trip, TripStatus to, UserAccount by, String note, boolean sms) {
+        TripStatus from = trip.getStatus();
+        if (from == to || from == TripStatus.COMPLETED || from == TripStatus.CANCELLED) {
+            return;
+        }
+        if (!isValidTransition(from, to)) {
+            return;
+        }
+        trip.setStatus(to);
+        if (to == TripStatus.EN_ROUTE && trip.getStartedAt() == null) {
+            trip.setStartedAt(Instant.now());
+        }
+        if (to == TripStatus.COMPLETED || to == TripStatus.CANCELLED) {
+            trip.setCompletedAt(Instant.now());
+            trip.setTrackingEnabled(false);
+            trip.getTanker().setStatus(TankerStatus.AVAILABLE);
+            boolean otherActive = tripRepository
+                    .findByDriverIdAndStatusNotIn(trip.getDriver().getId(),
+                            List.of(TripStatus.COMPLETED, TripStatus.CANCELLED))
+                    .stream()
+                    .anyMatch(t -> !t.getId().equals(trip.getId()));
+            trip.getDriver().setAvailable(!otherActive);
+            if (to == TripStatus.COMPLETED) {
+                trip.getDriver().setTotalTripsCompleted(trip.getDriver().getTotalTripsCompleted() + 1);
+            }
+            tankerRepository.save(trip.getTanker());
+            driverRepository.save(trip.getDriver());
+        }
+        boolean sent = sms && smsService.sendTripSms(trip, to);
+        recordHistory(trip, from, to, by, note, sent);
+    }
+
+    @Transactional
+    public TripResponse recordPayment(Long tripId, TripPaymentRequest req) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Trip trip = tripRepository.findByIdAndOperatorId(tripId, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
+        java.math.BigDecimal amount = req.getAmount();
+        if (amount == null || amount.compareTo(java.math.BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("Payment amount must be greater than zero");
+        }
+        java.math.BigDecimal tripAmount = trip.getTripAmount() != null ? trip.getTripAmount() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal paid = trip.getAmountPaid() != null ? trip.getAmountPaid() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal due = tripAmount.subtract(paid);
+        if (due.compareTo(java.math.BigDecimal.ZERO) <= 0) {
+            throw new BadRequestException("This trip is already fully paid");
+        }
+        if (amount.compareTo(due) > 0) {
+            throw new BadRequestException(
+                    "Payment ₹" + amount + " exceeds remaining due ₹" + due.stripTrailingZeros().toPlainString());
+        }
+        UserAccount recorder = userAccountRepository.findById(SecurityUtils.currentUser().getId()).orElse(null);
+        tripPaymentRepository.save(TripPayment.builder()
+                .trip(trip)
+                .amount(amount)
+                .recordedBy(recorder)
+                .note(req.getNote())
+                .build());
+        trip.setAmountPaid(paid.add(amount));
+        tripRepository.save(trip);
+        return toResponse(trip, false);
+    }
+
+    @Transactional(readOnly = true)
+    public CustomerDuesResponse customerDues(Long customerId) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Customer customer = customerRepository.findById(customerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Customer not found"));
+        if (!customer.getOperator().getId().equals(operatorId)) {
+            throw new BadRequestException("Customer not in your operator");
+        }
+        List<Trip> trips = tripRepository.findByOperatorIdOrderByCreatedAtDesc(operatorId).stream()
+                .filter(t -> t.getCustomer().getId().equals(customerId))
+                .collect(Collectors.toList());
+        java.math.BigDecimal totalDue = java.math.BigDecimal.ZERO;
+        java.math.BigDecimal totalBilled = java.math.BigDecimal.ZERO;
+        java.math.BigDecimal totalPaid = java.math.BigDecimal.ZERO;
+        List<TripDueItem> items = new java.util.ArrayList<>();
+        for (Trip t : trips) {
+            java.math.BigDecimal amt = t.getTripAmount() != null ? t.getTripAmount() : java.math.BigDecimal.ZERO;
+            java.math.BigDecimal paid = t.getAmountPaid() != null ? t.getAmountPaid() : java.math.BigDecimal.ZERO;
+            java.math.BigDecimal due = amt.subtract(paid);
+            totalBilled = totalBilled.add(amt);
+            totalPaid = totalPaid.add(paid);
+            if (due.compareTo(java.math.BigDecimal.ZERO) > 0) {
+                totalDue = totalDue.add(due);
+            }
+            items.add(TripDueItem.builder()
+                    .tripId(t.getId())
+                    .tripCode(t.getTripCode())
+                    .dropAddress(t.getDropAddress())
+                    .status(t.getStatus())
+                    .tripAmount(amt)
+                    .amountPaid(paid)
+                    .amountDue(due.max(java.math.BigDecimal.ZERO))
+                    .build());
+        }
+        return CustomerDuesResponse.builder()
+                .customerId(customer.getId())
+                .customerName(customer.getName())
+                .customerPhone(customer.getPhone())
+                .totalBilled(totalBilled)
+                .totalPaid(totalPaid)
+                .totalDue(totalDue)
+                .trips(items)
+                .build();
     }
 
     @Transactional(readOnly = true)
@@ -350,12 +542,29 @@ public class TripService {
     }
 
     private TripResponse toResponse(Trip trip, boolean withHistory) {
+        java.math.BigDecimal tripAmount = trip.getTripAmount() != null ? trip.getTripAmount() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal amountPaid = trip.getAmountPaid() != null ? trip.getAmountPaid() : java.math.BigDecimal.ZERO;
+        java.math.BigDecimal amountDue = tripAmount.subtract(amountPaid).max(java.math.BigDecimal.ZERO);
+
+        String navigateUrl;
+        if (trip.getStatus() == TripStatus.ASSIGNED
+                || trip.getStatus() == TripStatus.GOING_FOR_LOADING
+                || trip.getStatus() == TripStatus.LOADING) {
+            navigateUrl = "https://www.google.com/maps/dir/?api=1&destination="
+                    + trip.getBore().getLatitude() + "," + trip.getBore().getLongitude();
+        } else {
+            navigateUrl = "https://www.google.com/maps/dir/?api=1&destination="
+                    + trip.getDropLat() + "," + trip.getDropLng();
+        }
+
         TripResponse.TripResponseBuilder b = TripResponse.builder()
                 .id(trip.getId())
                 .tripCode(trip.getTripCode())
                 .status(trip.getStatus())
                 .customerName(trip.getCustomer().getName())
                 .customerPhone(trip.getCustomer().getPhone())
+                .customerId(trip.getCustomer().getId())
+                .customerLocationId(trip.getCustomerLocation() != null ? trip.getCustomerLocation().getId() : null)
                 .tankerNumber(trip.getTanker().getVehicleNumber())
                 .driverId(trip.getDriver().getId())
                 .driverName(trip.getDriver().getUser().getFullName())
@@ -370,8 +579,10 @@ public class TripService {
                 .distanceKm(round1(etaService.distanceKm(
                         trip.getBore().getLatitude(), trip.getBore().getLongitude(),
                         trip.getDropLat(), trip.getDropLng())))
-                .mapsNavigateUrl("https://www.google.com/maps/dir/?api=1&destination="
-                        + trip.getDropLat() + "," + trip.getDropLng())
+                .mapsNavigateUrl(navigateUrl)
+                .tripAmount(tripAmount)
+                .amountPaid(amountPaid)
+                .amountDue(amountDue)
                 .trackingToken(trip.getTrackingToken())
                 .trackingEnabled(trip.isTrackingEnabled())
                 .assignedAt(trip.getAssignedAt())

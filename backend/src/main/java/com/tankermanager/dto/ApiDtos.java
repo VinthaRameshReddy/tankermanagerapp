@@ -58,6 +58,8 @@ public final class ApiDtos {
         private String mapsLink;
         private BigDecimal latitude;
         private BigDecimal longitude;
+        /** Per-trip rate for this drop location (peak season can change later). */
+        private BigDecimal tripRate;
     }
 
     @Data
@@ -69,6 +71,7 @@ public final class ApiDtos {
         private BigDecimal latitude;
         private BigDecimal longitude;
         private String mapsLink;
+        private BigDecimal tripRate;
     }
 
     @Data
@@ -124,6 +127,8 @@ public final class ApiDtos {
         private BigDecimal dropLng;
         /** Optional Maps link when booking without a saved location. */
         private String mapsLink;
+        /** Optional fare override; otherwise uses the location's current tripRate. */
+        private BigDecimal tripAmount;
         private String notes;
     }
 
@@ -152,6 +157,8 @@ public final class ApiDtos {
         private TripStatus status;
         private String customerName;
         private String customerPhone;
+        private Long customerId;
+        private Long customerLocationId;
         private String tankerNumber;
         private Long driverId;
         private String driverName;
@@ -165,8 +172,11 @@ public final class ApiDtos {
         private Integer etaMinutes;
         /** Straight-line / route distance bore → drop (km). */
         private Double distanceKm;
-        /** Open-in-maps URL for the drop point. */
+        /** Open-in-maps URL for bore or drop depending on status. */
         private String mapsNavigateUrl;
+        private BigDecimal tripAmount;
+        private BigDecimal amountPaid;
+        private BigDecimal amountDue;
         private String trackingToken;
         private boolean trackingEnabled;
         private Instant assignedAt;
@@ -174,6 +184,37 @@ public final class ApiDtos {
         private Instant completedAt;
         private String notes;
         private List<StatusHistoryItem> history;
+    }
+
+    @Data
+    public static class TripPaymentRequest {
+        @NotNull
+        private BigDecimal amount;
+        private String note;
+    }
+
+    @Data
+    @Builder
+    public static class TripDueItem {
+        private Long tripId;
+        private String tripCode;
+        private String dropAddress;
+        private TripStatus status;
+        private BigDecimal tripAmount;
+        private BigDecimal amountPaid;
+        private BigDecimal amountDue;
+    }
+
+    @Data
+    @Builder
+    public static class CustomerDuesResponse {
+        private Long customerId;
+        private String customerName;
+        private String customerPhone;
+        private BigDecimal totalBilled;
+        private BigDecimal totalPaid;
+        private BigDecimal totalDue;
+        private List<TripDueItem> trips;
     }
 
     @Data

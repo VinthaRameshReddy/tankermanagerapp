@@ -4,7 +4,10 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -41,21 +44,50 @@ fun AuthScreen(
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
 
     var phone by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
+
+    fun doLogin() {
+        error = null
+        loading = true
+        scope.launch {
+            val result = repo.safe {
+                login(LoginRequest(phone.trim(), password))
+            }
+            loading = false
+            result.onSuccess { auth ->
+                val token = auth.token
+                if (token.isNullOrBlank()) {
+                    error = "No token returned"
+                    return@onSuccess
+                }
+                repo.session().save(
+                    token = token,
+                    role = auth.role,
+                    name = auth.fullName,
+                    operator = auth.operatorName,
+                    phone = auth.phone
+                )
+                onLoggedIn(auth.role)
+            }.onFailure { error = it.message }
+        }
+    }
 
     WaveBackground {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 22.dp, vertical = 36.dp),
+                .imePadding()
+                .navigationBarsPadding()
+                .verticalScroll(scroll)
+                .padding(horizontal = 22.dp, vertical = 28.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(modifier = Modifier.height(24.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             PulsingTruck()
-            Spacer(modifier = Modifier.height(16.dp))
+            Spacer(modifier = Modifier.height(12.dp))
             Text(
                 "TankerFlow",
                 style = MaterialTheme.typography.displayLarge,
@@ -67,13 +99,13 @@ fun AuthScreen(
                 color = Color.White.copy(alpha = 0.9f),
                 style = MaterialTheme.typography.bodyLarge
             )
-            Spacer(modifier = Modifier.height(28.dp))
+            Spacer(modifier = Modifier.height(24.dp))
 
-            GlassCard {
+            GlassCard(modifier = Modifier.fillMaxWidth()) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                     Text("Welcome back", style = MaterialTheme.typography.headlineMedium)
                     Text(
-                        "Login with the account created for you. Owners are registered by Super Admin.",
+                        "Login with your phone. Owners are registered by Super Admin.",
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     ErrorBanner(error)
@@ -82,31 +114,7 @@ fun AuthScreen(
                     PrimaryButton(
                         text = "Login",
                         loading = loading,
-                        onClick = {
-                            error = null
-                            loading = true
-                            scope.launch {
-                                val result = repo.safe {
-                                    login(LoginRequest(phone.trim(), password))
-                                }
-                                loading = false
-                                result.onSuccess { auth ->
-                                    val token = auth.token
-                                    if (token.isNullOrBlank()) {
-                                        error = "No token returned"
-                                        return@onSuccess
-                                    }
-                                    repo.session().save(
-                                        token = token,
-                                        role = auth.role,
-                                        name = auth.fullName,
-                                        operator = auth.operatorName,
-                                        phone = auth.phone
-                                    )
-                                    onLoggedIn(auth.role)
-                                }.onFailure { error = it.message }
-                            }
-                        }
+                        onClick = { doLogin() }
                     )
                 }
             }
@@ -117,6 +125,7 @@ fun AuthScreen(
                 onClick = onTrackTap,
                 modifier = Modifier.padding(horizontal = 4.dp)
             )
+            Spacer(modifier = Modifier.height(48.dp))
         }
     }
 }

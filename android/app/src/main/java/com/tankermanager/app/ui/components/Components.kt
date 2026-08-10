@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -302,6 +303,52 @@ fun PulsingTruck(modifier: Modifier = Modifier) {
             tint = LagoonDeep,
             modifier = Modifier.size(40.dp)
         )
+    }
+}
+
+/** Tanker driving across the splash screen. */
+@Composable
+fun RunningTruck(modifier: Modifier = Modifier) {
+    val transition = rememberInfiniteTransition(label = "run")
+    val offsetX by transition.animateFloat(
+        initialValue = -120f,
+        targetValue = 120f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2200, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "offsetX"
+    )
+    val bounce by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 6f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(350, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "bounce"
+    )
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(100.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .offset(x = offsetX.dp, y = bounce.dp)
+                .size(72.dp)
+                .clip(CircleShape)
+                .background(Brush.radialGradient(listOf(Color.White.copy(alpha = 0.95f), Mist))),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Rounded.LocalShipping,
+                contentDescription = null,
+                tint = LagoonDeep,
+                modifier = Modifier.size(36.dp)
+            )
+        }
     }
 }
 

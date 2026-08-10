@@ -2,7 +2,6 @@ package com.tankermanager.app.ui
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Spacer
@@ -19,12 +18,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tankermanager.app.data.repo.TankerRepository
-import com.tankermanager.app.ui.components.PulsingTruck
+import com.tankermanager.app.ui.components.RunningTruck
 import com.tankermanager.app.ui.components.WaveBackground
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
@@ -36,11 +34,10 @@ fun SplashScreen(
 ) {
     var ready by remember { mutableStateOf(false) }
     val alpha by animateFloatAsState(if (ready) 1f else 0f, tween(700), label = "a")
-    val scale by animateFloatAsState(if (ready) 1f else 0.85f, tween(700), label = "s")
 
     LaunchedEffect(Unit) {
         ready = true
-        delay(1100)
+        delay(2400)
         val token = repo.session().token.first()
         val role = repo.session().role.first()
         when {
@@ -55,10 +52,10 @@ fun SplashScreen(
         Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Column(
                 horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier.alpha(alpha).scale(scale)
+                modifier = Modifier.alpha(alpha)
             ) {
-                PulsingTruck()
-                Spacer(modifier = Modifier.height(16.dp))
+                RunningTruck()
+                Spacer(modifier = Modifier.height(20.dp))
                 Text(
                     "TankerFlow",
                     style = MaterialTheme.typography.displayLarge,

@@ -3,6 +3,7 @@ package com.tankermanager.app.ui.manager
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.slideInVertically
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -57,6 +58,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tankermanager.app.data.model.BoreExpenseRequest
 import com.tankermanager.app.data.model.BoreRequest
@@ -66,6 +68,7 @@ import com.tankermanager.app.data.model.CustomerResponse
 import com.tankermanager.app.data.model.DashboardResponse
 import com.tankermanager.app.data.model.DriverResponse
 import com.tankermanager.app.data.model.ExpenseRequest
+import com.tankermanager.app.data.model.ExpenseResponse
 import com.tankermanager.app.data.model.SalaryRequest
 import com.tankermanager.app.data.model.TankerRequest
 import com.tankermanager.app.data.model.TankerResponse
@@ -193,15 +196,29 @@ private fun DashboardTab(repo: TankerRepository, onLogout: () -> Unit) {
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column {
-                        Text("Hi, ${name ?: "Manager"} 👋", color = Color.White, style = MaterialTheme.typography.headlineMedium)
-                        Text(operator ?: "Your fleet", color = Color.White.copy(alpha = 0.85f))
-                    }
-                    TextButton(onClick = onLogout) {
-                        Text("Logout", color = Color.White)
+                    Text(
+                        text = operator?.ifBlank { "Your company" } ?: "Your company",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier.weight(1f, fill = false),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    TextButton(
+                        onClick = onLogout,
+                        modifier = Modifier.padding(start = 8.dp)
+                    ) {
+                        Text("Logout", color = Color.White, maxLines = 1)
                     }
                 }
-                Spacer(modifier = Modifier.height(18.dp))
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    "Hi, ${name ?: "Manager"} 👋",
+                    color = Color.White.copy(alpha = 0.92f),
+                    style = MaterialTheme.typography.titleMedium
+                )
+                Spacer(modifier = Modifier.height(14.dp))
                 Text(
                     "Live pulse of your water business",
                     color = Color.White.copy(alpha = 0.9f),
@@ -729,74 +746,235 @@ private fun FleetTab(repo: TankerRepository) {
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MoneyTab(repo: TankerRepository) {
     var amount by remember { mutableStateOf("") }
-    var tankerId by remember { mutableStateOf<Long?>(null) }
+    var addTankerId by remember { mutableStateOf<Long?>(null) }
+    var filterTankerId by remember { mutableStateOf<Long?>(null) }
+    var tankerMenuOpen by remember { mutableStateOf(false) }
     var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
+    var expenses by remember { mutableStateOf<List<ExpenseResponse>>(emptyList()) }
     var type by remember { mutableStateOf("DIESEL") }
-    var expenseList by remember { mutableStateOf(listOf<String>()) }
     var salaryDriver by remember { mutableStateOf<Long?>(null) }
     var drivers by remember { mutableStateOf<List<DriverResponse>>(emptyList()) }
     var salaryBase by remember { mutableStateOf("15000") }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
 
-    LaunchedEffect(Unit) {
-        repo.safe { tankers() }.onSuccess {
-            tankers = it
-            tankerId = it.firstOrNull()?.id
-        }
-        repo.safe { drivers() }.onSuccess {
-            drivers = it
-            salaryDriver = it.firstOrNull()?.id
-        }
-        repo.safe { expenses() }.onSuccess {
-            expenseList = it.take(12).map { e ->
-                "${e.vehicleNumber} • ${e.type} • ₹${e.amount}"
+    fun loadData() {
+        scope.launch {
+            repo.safe { tankers() }.onSuccess {
+                tankers = it
+                if (addTankerId == null) addTankerId = it.firstOrNull()?.id
             }
+            repo.safe { drivers() }.onSuccess {
+                drivers = it
+                if (salaryDriver == null) salaryDriver = it.firstOrNull()?.id
+            }
+            repo.safe { expenses() }.onSuccess { expenses = it }
         }
     }
 
-    ScreenScaffold(title = "Money", subtitle = "Diesel, maintenance, salaries, bore") {
+    LaunchedEffect(Unit) { loadData() }
+
+    val filtered = if (filterTankerId == null) {
+        expenses
+    } else {
+        expenses.filter { it.tankerId == filterTankerId }
+    }
+    val overallTotal = expenses.sumOf { it.amount ?: 0.0 }
+    val shownTotal = filtered.sumOf { it.amount ?: 0.0 }
+    val perVehicle = tankers.associate { t ->
+        t.id to expenses.filter { it.tankerId == t.id }.sumOf { it.amount ?: 0.0 }
+    }
+    val selectedAddTanker = tankers.firstOrNull { it.id == addTankerId }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scroll)
+            .padding(20.dp)
+    ) {
+        Text("Money", style = MaterialTheme.typography.headlineMedium)
+        Text("Vehicle-wise diesel, tyres & maintenance", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(12.dp))
         ErrorBanner(msg)
-        Text("Vehicle expense", style = MaterialTheme.typography.titleLarge)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("DIESEL", "MAINTENANCE", "TYRE", "TOLL").forEach {
-                FilterChip(selected = type == it, onClick = { type = it }, label = { Text(it.lowercase().replaceFirstChar { c -> c.titlecase() }) })
+
+        GlassCard {
+            Text("All vehicles total", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "₹${"%.0f".format(overallTotal)}",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = LagoonDeep
+            )
+            if (filterTankerId != null) {
+                val label = tankers.firstOrNull { it.id == filterTankerId }?.vehicleNumber ?: "Vehicle"
+                Text("Filtered ($label): ₹${"%.0f".format(shownTotal)}", color = Coral)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("Per vehicle spend", fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            tankers.forEach { t ->
+                FilterChip(
+                    selected = filterTankerId == t.id,
+                    onClick = { filterTankerId = if (filterTankerId == t.id) null else t.id },
+                    label = { Text("${t.vehicleNumber} ₹${"%.0f".format(perVehicle[t.id] ?: 0.0)}") }
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
+        Text("Add vehicle expense", style = MaterialTheme.typography.titleLarge)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("DIESEL", "MAINTENANCE", "TYRE", "TOLL", "OTHER").forEach {
+                FilterChip(
+                    selected = type == it,
+                    onClick = { type = it },
+                    label = { Text(it.lowercase().replaceFirstChar { c -> c.titlecase() }) }
+                )
             }
         }
         SoftField(amount, { amount = it }, "Amount ₹")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            tankers.take(3).forEach { t ->
-                FilterChip(selected = tankerId == t.id, onClick = { tankerId = t.id }, label = { Text(t.vehicleNumber) })
+
+        Text("Select vehicle", fontWeight = FontWeight.SemiBold)
+        ExposedDropdownMenuBox(
+            expanded = tankerMenuOpen,
+            onExpandedChange = { tankerMenuOpen = it }
+        ) {
+            OutlinedTextField(
+                value = selectedAddTanker?.vehicleNumber ?: "Choose tanker",
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = tankerMenuOpen) },
+                modifier = Modifier
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                    .fillMaxWidth()
+            )
+            ExposedDropdownMenu(
+                expanded = tankerMenuOpen,
+                onDismissRequest = { tankerMenuOpen = false }
+            ) {
+                tankers.forEach { t ->
+                    DropdownMenuItem(
+                        text = { Text(t.vehicleNumber) },
+                        onClick = {
+                            addTankerId = t.id
+                            tankerMenuOpen = false
+                        }
+                    )
+                }
             }
         }
-        PrimaryButton("Save expense", onClick = {
-            val tid = tankerId ?: return@PrimaryButton
+
+        PrimaryButton("Save expense for ${selectedAddTanker?.vehicleNumber ?: "vehicle"}", onClick = {
+            val tid = addTankerId
+            if (tid == null) {
+                msg = "Select a vehicle first"
+                return@PrimaryButton
+            }
+            val amt = amount.toDoubleOrNull()
+            if (amt == null || amt <= 0) {
+                msg = "Enter a valid amount"
+                return@PrimaryButton
+            }
             scope.launch {
                 repo.safe {
                     addExpense(
                         ExpenseRequest(
                             tankerId = tid,
                             type = type,
-                            amount = amount.toDoubleOrNull() ?: 0.0,
+                            amount = amt,
                             expenseDate = LocalDate.now().toString()
                         )
                     )
                 }.onSuccess {
-                    msg = "Expense saved"
+                    msg = "Expense saved for ${selectedAddTanker?.vehicleNumber}"
                     amount = ""
+                    loadData()
                 }.onFailure { msg = it.message }
             }
         })
 
         Spacer(modifier = Modifier.height(16.dp))
+        Text("View expenses", style = MaterialTheme.typography.titleLarge)
+        Text("Filter by vehicle", fontWeight = FontWeight.SemiBold)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = filterTankerId == null,
+                onClick = { filterTankerId = null },
+                label = { Text("All vehicles") }
+            )
+            tankers.forEach { t ->
+                FilterChip(
+                    selected = filterTankerId == t.id,
+                    onClick = { filterTankerId = t.id },
+                    label = { Text(t.vehicleNumber) }
+                )
+            }
+        }
+
+        if (filtered.isEmpty()) {
+            Text("No expenses yet for this filter.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            filtered.take(30).forEach { e ->
+                GlassCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(e.vehicleNumber ?: "—", fontWeight = FontWeight.Bold)
+                            Text(
+                                "${e.type?.lowercase()?.replaceFirstChar { c -> c.titlecase() }} • ${e.expenseDate ?: ""}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text(
+                            "₹${"%.0f".format(e.amount ?: 0.0)}",
+                            fontWeight = FontWeight.Bold,
+                            color = Coral
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
+            }
+        }
+
+        Spacer(modifier = Modifier.height(16.dp))
         Text("Driver salary", style = MaterialTheme.typography.titleLarge)
         SoftField(salaryBase, { salaryBase = it }, "Base amount")
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            drivers.take(3).forEach { d ->
-                FilterChip(selected = salaryDriver == d.id, onClick = { salaryDriver = d.id }, label = { Text(d.fullName ?: "D") })
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            drivers.forEach { d ->
+                FilterChip(
+                    selected = salaryDriver == d.id,
+                    onClick = { salaryDriver = d.id },
+                    label = { Text(d.fullName ?: d.phone ?: "Driver") }
+                )
             }
         }
         CoralButton("Mark salary for ${YearMonth.now()}", onClick = {
@@ -818,9 +996,13 @@ private fun MoneyTab(repo: TankerRepository) {
 
         Spacer(modifier = Modifier.height(16.dp))
         Text("Bore power / maintenance", style = MaterialTheme.typography.titleLarge)
-        SoftField(amount, { amount = it }, "Bore expense ₹")
-        PrimaryButton("Add bore POWER charge", onClick = {
+        PrimaryButton("Add bore POWER charge (uses amount above)", onClick = {
             scope.launch {
+                val amt = amount.toDoubleOrNull()
+                if (amt == null || amt <= 0) {
+                    msg = "Enter amount in the field above first"
+                    return@launch
+                }
                 val bores = repo.safe { bores() }.getOrNull()
                 val bore = bores?.firstOrNull()
                 if (bore == null) {
@@ -832,18 +1014,15 @@ private fun MoneyTab(repo: TankerRepository) {
                         BoreExpenseRequest(
                             boreId = bore.id,
                             type = "POWER",
-                            amount = amount.toDoubleOrNull() ?: 0.0
+                            amount = amt
                         )
                     )
-                }.onSuccess { msg = "Bore expense saved" }
-                    .onFailure { msg = it.message }
+                }.onSuccess {
+                    msg = "Bore expense saved"
+                    amount = ""
+                }.onFailure { msg = it.message }
             }
         })
-
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("Recent expenses", style = MaterialTheme.typography.titleMedium)
-        expenseList.forEach {
-            Text("• $it", modifier = Modifier.padding(vertical = 4.dp))
-        }
+        Spacer(modifier = Modifier.height(24.dp))
     }
 }

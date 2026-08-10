@@ -15,7 +15,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material3.Surface
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -61,7 +62,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tankermanager.app.data.model.BoreExpenseRequest
+import com.tankermanager.app.data.model.BoreExpenseResponse
 import com.tankermanager.app.data.model.BoreRequest
+import com.tankermanager.app.data.model.BoreResponse
 import com.tankermanager.app.data.model.BookTripRequest
 import com.tankermanager.app.data.model.CreateStaffRequest
 import com.tankermanager.app.data.model.CustomerResponse
@@ -749,169 +752,382 @@ private fun FleetTab(repo: TankerRepository) {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MoneyTab(repo: TankerRepository) {
+    var side by remember { mutableStateOf("add") } // add | view
+
+    Row(modifier = Modifier.fillMaxSize()) {
+        MoneySideBar(
+            selectedAdd = side == "add",
+            onAdd = { side = "add" },
+            onView = { side = "view" }
+        )
+        Box(modifier = Modifier.weight(1f)) {
+            when (side) {
+                "view" -> ViewExpensesPanel(repo)
+                else -> AddExpensePanel(repo)
+            }
+        }
+    }
+}
+
+@Composable
+private fun MoneySideBar(
+    selectedAdd: Boolean,
+    onAdd: () -> Unit,
+    onView: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .width(96.dp)
+            .fillMaxSize()
+            .background(Color(0xFFE3F0ED))
+            .padding(vertical = 16.dp, horizontal = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(
+            "Money",
+            style = MaterialTheme.typography.labelLarge,
+            fontWeight = FontWeight.Bold,
+            color = LagoonDeep,
+            modifier = Modifier.padding(bottom = 4.dp)
+        )
+        MoneySideItem(label = "Add\nexpense", selected = selectedAdd, onClick = onAdd)
+        MoneySideItem(label = "View\nexpenses", selected = !selectedAdd, onClick = onView)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MoneySideItem(label: String, selected: Boolean, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(14.dp),
+        color = if (selected) LagoonDeep else Color.White,
+        shadowElevation = if (selected) 2.dp else 0.dp,
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Text(
+            text = label,
+            modifier = Modifier.padding(vertical = 14.dp, horizontal = 8.dp),
+            style = MaterialTheme.typography.labelMedium,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Normal,
+            color = if (selected) Color.White else LagoonDeep
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AddExpensePanel(repo: TankerRepository) {
     var amount by remember { mutableStateOf("") }
-    var addTankerId by remember { mutableStateOf<Long?>(null) }
-    var filterTankerId by remember { mutableStateOf<Long?>(null) }
-    var tankerMenuOpen by remember { mutableStateOf(false) }
-    var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
-    var expenses by remember { mutableStateOf<List<ExpenseResponse>>(emptyList()) }
-    var type by remember { mutableStateOf("DIESEL") }
-    var salaryDriver by remember { mutableStateOf<Long?>(null) }
-    var drivers by remember { mutableStateOf<List<DriverResponse>>(emptyList()) }
+    var vehicleId by remember { mutableStateOf<Long?>(null) }
+    var vehicleMenuOpen by remember { mutableStateOf(false) }
+    var kind by remember { mutableStateOf("VEHICLE") } // VEHICLE | BORE | DRIVER
+    var kindMenuOpen by remember { mutableStateOf(false) }
+    var vehicleType by remember { mutableStateOf("DIESEL") }
+    var boreType by remember { mutableStateOf("POWER") }
+    var boreId by remember { mutableStateOf<Long?>(null) }
+    var boreMenuOpen by remember { mutableStateOf(false) }
+    var driverId by remember { mutableStateOf<Long?>(null) }
+    var driverMenuOpen by remember { mutableStateOf(false) }
     var salaryBase by remember { mutableStateOf("15000") }
+
+    var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
+    var bores by remember { mutableStateOf<List<BoreResponse>>(emptyList()) }
+    var drivers by remember { mutableStateOf<List<DriverResponse>>(emptyList()) }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
     val scroll = rememberScrollState()
 
-    fun loadData() {
+    fun reload() {
         scope.launch {
             repo.safe { tankers() }.onSuccess {
                 tankers = it
-                if (addTankerId == null) addTankerId = it.firstOrNull()?.id
+                if (vehicleId == null) vehicleId = it.firstOrNull()?.id
+            }
+            repo.safe { bores() }.onSuccess {
+                bores = it
+                if (boreId == null) boreId = it.firstOrNull()?.id
             }
             repo.safe { drivers() }.onSuccess {
                 drivers = it
-                if (salaryDriver == null) salaryDriver = it.firstOrNull()?.id
+                if (driverId == null) driverId = it.firstOrNull()?.id
             }
-            repo.safe { expenses() }.onSuccess { expenses = it }
         }
     }
 
-    LaunchedEffect(Unit) { loadData() }
+    LaunchedEffect(Unit) { reload() }
 
-    val filtered = if (filterTankerId == null) {
-        expenses
-    } else {
-        expenses.filter { it.tankerId == filterTankerId }
+    val vehicle = tankers.firstOrNull { it.id == vehicleId }
+    val bore = bores.firstOrNull { it.id == boreId }
+    val driver = drivers.firstOrNull { it.id == driverId }
+    val kindLabel = when (kind) {
+        "BORE" -> "Bore"
+        "DRIVER" -> "Driver salary"
+        else -> "Vehicle maintenance"
     }
-    val overallTotal = expenses.sumOf { it.amount ?: 0.0 }
-    val shownTotal = filtered.sumOf { it.amount ?: 0.0 }
-    val perVehicle = tankers.associate { t ->
-        t.id to expenses.filter { it.tankerId == t.id }.sumOf { it.amount ?: 0.0 }
-    }
-    val selectedAddTanker = tankers.firstOrNull { it.id == addTankerId }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(scroll)
-            .padding(20.dp)
+            .padding(16.dp)
     ) {
-        Text("Money", style = MaterialTheme.typography.headlineMedium)
-        Text("Vehicle-wise diesel, tyres & maintenance", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(modifier = Modifier.height(12.dp))
+        Text("Add expense", style = MaterialTheme.typography.headlineMedium)
+        Text("Choose vehicle context, then expense type", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(10.dp))
         ErrorBanner(msg)
 
         GlassCard {
-            Text("All vehicles total", style = MaterialTheme.typography.titleMedium)
+            Text("Vehicle (for fleet records)", fontWeight = FontWeight.SemiBold, color = LagoonDeep)
             Text(
-                "₹${"%.0f".format(overallTotal)}",
-                style = MaterialTheme.typography.headlineLarge,
-                fontWeight = FontWeight.Bold,
-                color = LagoonDeep
+                vehicle?.vehicleNumber ?: "Select vehicle",
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Bold
             )
-            if (filterTankerId != null) {
-                val label = tankers.firstOrNull { it.id == filterTankerId }?.vehicleNumber ?: "Vehicle"
-                Text("Filtered ($label): ₹${"%.0f".format(shownTotal)}", color = Coral)
-            }
-        }
-
-        Spacer(modifier = Modifier.height(12.dp))
-        Text("Per vehicle spend", fontWeight = FontWeight.SemiBold)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            tankers.forEach { t ->
-                FilterChip(
-                    selected = filterTankerId == t.id,
-                    onClick = { filterTankerId = if (filterTankerId == t.id) null else t.id },
-                    label = { Text("${t.vehicleNumber} ₹${"%.0f".format(perVehicle[t.id] ?: 0.0)}") }
+            Text("Expenses are tagged to this tanker in reports", style = MaterialTheme.typography.bodySmall)
+            Spacer(modifier = Modifier.height(8.dp))
+            ExposedDropdownMenuBox(expanded = vehicleMenuOpen, onExpandedChange = { vehicleMenuOpen = it }) {
+                OutlinedTextField(
+                    value = vehicle?.vehicleNumber ?: "Choose vehicle",
+                    onValueChange = {},
+                    readOnly = true,
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = vehicleMenuOpen) },
+                    modifier = Modifier
+                        .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                        .fillMaxWidth()
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("Add vehicle expense", style = MaterialTheme.typography.titleLarge)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("DIESEL", "MAINTENANCE", "TYRE", "TOLL", "OTHER").forEach {
-                FilterChip(
-                    selected = type == it,
-                    onClick = { type = it },
-                    label = { Text(it.lowercase().replaceFirstChar { c -> c.titlecase() }) }
-                )
-            }
-        }
-        SoftField(amount, { amount = it }, "Amount ₹")
-
-        Text("Select vehicle", fontWeight = FontWeight.SemiBold)
-        ExposedDropdownMenuBox(
-            expanded = tankerMenuOpen,
-            onExpandedChange = { tankerMenuOpen = it }
-        ) {
-            OutlinedTextField(
-                value = selectedAddTanker?.vehicleNumber ?: "Choose tanker",
-                onValueChange = {},
-                readOnly = true,
-                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = tankerMenuOpen) },
-                modifier = Modifier
-                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
-                    .fillMaxWidth()
-            )
-            ExposedDropdownMenu(
-                expanded = tankerMenuOpen,
-                onDismissRequest = { tankerMenuOpen = false }
-            ) {
-                tankers.forEach { t ->
-                    DropdownMenuItem(
-                        text = { Text(t.vehicleNumber) },
-                        onClick = {
-                            addTankerId = t.id
-                            tankerMenuOpen = false
-                        }
-                    )
+                ExposedDropdownMenu(expanded = vehicleMenuOpen, onDismissRequest = { vehicleMenuOpen = false }) {
+                    tankers.forEach { t ->
+                        DropdownMenuItem(
+                            text = { Text(t.vehicleNumber) },
+                            onClick = {
+                                vehicleId = t.id
+                                vehicleMenuOpen = false
+                            }
+                        )
+                    }
                 }
             }
         }
 
-        PrimaryButton("Save expense for ${selectedAddTanker?.vehicleNumber ?: "vehicle"}", onClick = {
-            val tid = addTankerId
-            if (tid == null) {
-                msg = "Select a vehicle first"
-                return@PrimaryButton
+        Spacer(modifier = Modifier.height(14.dp))
+        Text("Expense type", fontWeight = FontWeight.SemiBold)
+        ExposedDropdownMenuBox(expanded = kindMenuOpen, onExpandedChange = { kindMenuOpen = it }) {
+            OutlinedTextField(
+                value = kindLabel,
+                onValueChange = {},
+                readOnly = true,
+                trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = kindMenuOpen) },
+                modifier = Modifier
+                    .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                    .fillMaxWidth()
+            )
+            ExposedDropdownMenu(expanded = kindMenuOpen, onDismissRequest = { kindMenuOpen = false }) {
+                DropdownMenuItem(text = { Text("Vehicle — diesel / tyre / toll") }, onClick = {
+                    kind = "VEHICLE"; kindMenuOpen = false
+                })
+                DropdownMenuItem(text = { Text("Bore — power / maintenance") }, onClick = {
+                    kind = "BORE"; kindMenuOpen = false
+                })
+                DropdownMenuItem(text = { Text("Driver — monthly salary") }, onClick = {
+                    kind = "DRIVER"; kindMenuOpen = false
+                })
             }
-            val amt = amount.toDoubleOrNull()
-            if (amt == null || amt <= 0) {
-                msg = "Enter a valid amount"
-                return@PrimaryButton
-            }
-            scope.launch {
-                repo.safe {
-                    addExpense(
-                        ExpenseRequest(
-                            tankerId = tid,
-                            type = type,
-                            amount = amt,
-                            expenseDate = LocalDate.now().toString()
-                        )
-                    )
-                }.onSuccess {
-                    msg = "Expense saved for ${selectedAddTanker?.vehicleNumber}"
-                    amount = ""
-                    loadData()
-                }.onFailure { msg = it.message }
-            }
-        })
+        }
 
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("View expenses", style = MaterialTheme.typography.titleLarge)
+        Spacer(modifier = Modifier.height(12.dp))
+        SoftField(amount, { amount = it }, "Amount ₹")
+
+        when (kind) {
+            "BORE" -> {
+                Text("Select bore", fontWeight = FontWeight.SemiBold)
+                ExposedDropdownMenuBox(expanded = boreMenuOpen, onExpandedChange = { boreMenuOpen = it }) {
+                    OutlinedTextField(
+                        value = bore?.name ?: "Choose bore",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = boreMenuOpen) },
+                        modifier = Modifier
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                            .fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(expanded = boreMenuOpen, onDismissRequest = { boreMenuOpen = false }) {
+                        bores.forEach { b ->
+                            DropdownMenuItem(text = { Text(b.name ?: "Bore") }, onClick = {
+                                boreId = b.id; boreMenuOpen = false
+                            })
+                        }
+                    }
+                }
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("POWER", "MAINTENANCE", "OTHER").forEach {
+                        FilterChip(
+                            selected = boreType == it,
+                            onClick = { boreType = it },
+                            label = { Text(it.lowercase().replaceFirstChar { c -> c.titlecase() }) }
+                        )
+                    }
+                }
+                PrimaryButton("Save bore expense", onClick = {
+                    val bid = boreId
+                    val amt = amount.toDoubleOrNull()
+                    if (bid == null) { msg = "Select a bore"; return@PrimaryButton }
+                    if (amt == null || amt <= 0) { msg = "Enter valid amount"; return@PrimaryButton }
+                    scope.launch {
+                        repo.safe {
+                            addBoreExpense(
+                                BoreExpenseRequest(boreId = bid, type = boreType, amount = amt)
+                            )
+                        }.onSuccess {
+                            msg = "Bore expense saved"
+                            amount = ""
+                        }.onFailure { msg = it.message }
+                    }
+                })
+            }
+            "DRIVER" -> {
+                Text("Select driver", fontWeight = FontWeight.SemiBold)
+                ExposedDropdownMenuBox(expanded = driverMenuOpen, onExpandedChange = { driverMenuOpen = it }) {
+                    OutlinedTextField(
+                        value = driver?.fullName ?: driver?.phone ?: "Choose driver",
+                        onValueChange = {},
+                        readOnly = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = driverMenuOpen) },
+                        modifier = Modifier
+                            .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                            .fillMaxWidth()
+                    )
+                    ExposedDropdownMenu(expanded = driverMenuOpen, onDismissRequest = { driverMenuOpen = false }) {
+                        drivers.forEach { d ->
+                            DropdownMenuItem(
+                                text = { Text(d.fullName ?: d.phone ?: "Driver") },
+                                onClick = { driverId = d.id; driverMenuOpen = false }
+                            )
+                        }
+                    }
+                }
+                SoftField(salaryBase, { salaryBase = it }, "Salary base ₹")
+                CoralButton("Mark salary ${YearMonth.now()}", onClick = {
+                    val did = driverId ?: return@CoralButton
+                    scope.launch {
+                        repo.safe {
+                            addSalary(
+                                SalaryRequest(
+                                    driverId = did,
+                                    salaryMonth = YearMonth.now().toString(),
+                                    baseAmount = salaryBase.toDoubleOrNull() ?: 0.0,
+                                    markPaid = true
+                                )
+                            )
+                        }.onSuccess { msg = "Salary recorded for ${driver?.fullName}" }
+                            .onFailure { msg = it.message }
+                    }
+                })
+            }
+            else -> {
+                Text("Maintenance category", fontWeight = FontWeight.SemiBold)
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("DIESEL", "MAINTENANCE", "TYRE", "TOLL", "OTHER").forEach {
+                        FilterChip(
+                            selected = vehicleType == it,
+                            onClick = { vehicleType = it },
+                            label = { Text(it.lowercase().replaceFirstChar { c -> c.titlecase() }) }
+                        )
+                    }
+                }
+                PrimaryButton(
+                    "Save for ${vehicle?.vehicleNumber ?: "vehicle"}",
+                    onClick = {
+                        val tid = vehicleId
+                        val amt = amount.toDoubleOrNull()
+                        if (tid == null) { msg = "Select vehicle"; return@PrimaryButton }
+                        if (amt == null || amt <= 0) { msg = "Enter valid amount"; return@PrimaryButton }
+                        scope.launch {
+                            repo.safe {
+                                addExpense(
+                                    ExpenseRequest(
+                                        tankerId = tid,
+                                        type = vehicleType,
+                                        amount = amt,
+                                        expenseDate = LocalDate.now().toString()
+                                    )
+                                )
+                            }.onSuccess {
+                                msg = "Saved ${vehicleType.lowercase()} for ${vehicle?.vehicleNumber}"
+                                amount = ""
+                            }.onFailure { msg = it.message }
+                        }
+                    }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(24.dp))
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun ViewExpensesPanel(repo: TankerRepository) {
+    var filterTankerId by remember { mutableStateOf<Long?>(null) }
+    var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
+    var expenses by remember { mutableStateOf<List<ExpenseResponse>>(emptyList()) }
+    var boreExpenses by remember { mutableStateOf<List<BoreExpenseResponse>>(emptyList()) }
+    var msg by remember { mutableStateOf<String?>(null) }
+    val scope = rememberCoroutineScope()
+    val scroll = rememberScrollState()
+
+    fun load() {
+        scope.launch {
+            repo.safe { tankers() }.onSuccess { tankers = it }
+            repo.safe { expenses() }.onSuccess { expenses = it }
+            repo.safe { boreExpenses() }.onSuccess { boreExpenses = it }
+        }
+    }
+
+    LaunchedEffect(Unit) { load() }
+
+    val filtered = if (filterTankerId == null) expenses else expenses.filter { it.tankerId == filterTankerId }
+    val vehicleTotal = expenses.sumOf { it.amount ?: 0.0 }
+    val boreTotal = boreExpenses.sumOf { it.amount ?: 0.0 }
+    val shownVehicleTotal = filtered.sumOf { it.amount ?: 0.0 }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scroll)
+            .padding(16.dp)
+    ) {
+        Text("View expenses", style = MaterialTheme.typography.headlineMedium)
+        Text("Fleet + bore spend", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Spacer(modifier = Modifier.height(10.dp))
+        ErrorBanner(msg)
+
+        GlassCard {
+            Text("All vehicles", style = MaterialTheme.typography.titleMedium)
+            Text(
+                "₹${"%.0f".format(vehicleTotal)}",
+                style = MaterialTheme.typography.headlineLarge,
+                fontWeight = FontWeight.Bold,
+                color = LagoonDeep
+            )
+            Text("Bore (all): ₹${"%.0f".format(boreTotal)}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            if (filterTankerId != null) {
+                val v = tankers.firstOrNull { it.id == filterTankerId }?.vehicleNumber ?: "Vehicle"
+                Text("Filtered $v: ₹${"%.0f".format(shownVehicleTotal)}", color = Coral, fontWeight = FontWeight.SemiBold)
+            }
+        }
+
+        Spacer(modifier = Modifier.height(12.dp))
         Text("Filter by vehicle", fontWeight = FontWeight.SemiBold)
         Row(
             modifier = Modifier
@@ -922,7 +1138,7 @@ private fun MoneyTab(repo: TankerRepository) {
             FilterChip(
                 selected = filterTankerId == null,
                 onClick = { filterTankerId = null },
-                label = { Text("All vehicles") }
+                label = { Text("All") }
             )
             tankers.forEach { t ->
                 FilterChip(
@@ -933,10 +1149,12 @@ private fun MoneyTab(repo: TankerRepository) {
             }
         }
 
+        Spacer(modifier = Modifier.height(12.dp))
+        Text("Vehicle expenses", style = MaterialTheme.typography.titleLarge)
         if (filtered.isEmpty()) {
-            Text("No expenses yet for this filter.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text("No vehicle expenses for this filter.", color = MaterialTheme.colorScheme.onSurfaceVariant)
         } else {
-            filtered.take(30).forEach { e ->
+            filtered.forEach { e ->
                 GlassCard {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
@@ -949,11 +1167,7 @@ private fun MoneyTab(repo: TankerRepository) {
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
-                        Text(
-                            "₹${"%.0f".format(e.amount ?: 0.0)}",
-                            fontWeight = FontWeight.Bold,
-                            color = Coral
-                        )
+                        Text("₹${"%.0f".format(e.amount ?: 0.0)}", fontWeight = FontWeight.Bold, color = Coral)
                     }
                 }
                 Spacer(modifier = Modifier.height(8.dp))
@@ -961,68 +1175,29 @@ private fun MoneyTab(repo: TankerRepository) {
         }
 
         Spacer(modifier = Modifier.height(16.dp))
-        Text("Driver salary", style = MaterialTheme.typography.titleLarge)
-        SoftField(salaryBase, { salaryBase = it }, "Base amount")
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            drivers.forEach { d ->
-                FilterChip(
-                    selected = salaryDriver == d.id,
-                    onClick = { salaryDriver = d.id },
-                    label = { Text(d.fullName ?: d.phone ?: "Driver") }
-                )
+        Text("Bore expenses", style = MaterialTheme.typography.titleLarge)
+        if (boreExpenses.isEmpty()) {
+            Text("No bore expenses yet.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+        } else {
+            boreExpenses.take(20).forEach { e ->
+                GlassCard {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Column {
+                            Text(e.boreName ?: "Bore", fontWeight = FontWeight.Bold)
+                            Text(
+                                "${e.type?.lowercase()} • ${e.expenseDate ?: ""}",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        Text("₹${"%.0f".format(e.amount ?: 0.0)}", fontWeight = FontWeight.Bold, color = Coral)
+                    }
+                }
+                Spacer(modifier = Modifier.height(8.dp))
             }
         }
-        CoralButton("Mark salary for ${YearMonth.now()}", onClick = {
-            val did = salaryDriver ?: return@CoralButton
-            scope.launch {
-                repo.safe {
-                    addSalary(
-                        SalaryRequest(
-                            driverId = did,
-                            salaryMonth = YearMonth.now().toString(),
-                            baseAmount = salaryBase.toDoubleOrNull() ?: 0.0,
-                            markPaid = true
-                        )
-                    )
-                }.onSuccess { msg = "Salary recorded" }
-                    .onFailure { msg = it.message }
-            }
-        })
-
-        Spacer(modifier = Modifier.height(16.dp))
-        Text("Bore power / maintenance", style = MaterialTheme.typography.titleLarge)
-        PrimaryButton("Add bore POWER charge (uses amount above)", onClick = {
-            scope.launch {
-                val amt = amount.toDoubleOrNull()
-                if (amt == null || amt <= 0) {
-                    msg = "Enter amount in the field above first"
-                    return@launch
-                }
-                val bores = repo.safe { bores() }.getOrNull()
-                val bore = bores?.firstOrNull()
-                if (bore == null) {
-                    msg = "Add a bore in Fleet first"
-                    return@launch
-                }
-                repo.safe {
-                    addBoreExpense(
-                        BoreExpenseRequest(
-                            boreId = bore.id,
-                            type = "POWER",
-                            amount = amt
-                        )
-                    )
-                }.onSuccess {
-                    msg = "Bore expense saved"
-                    amount = ""
-                }.onFailure { msg = it.message }
-            }
-        })
         Spacer(modifier = Modifier.height(24.dp))
     }
 }

@@ -1,5 +1,8 @@
 package com.tankermanager.app.ui.manager
 
+import android.Manifest
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -24,8 +27,11 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.tankermanager.app.util.lastKnownLocation
+import com.tankermanager.app.util.MapsLinkResolver
 import com.tankermanager.app.data.model.BoreRequest
 import com.tankermanager.app.data.model.CreateStaffRequest
 import com.tankermanager.app.data.model.CustomerLocationRequest
@@ -68,11 +74,15 @@ fun FleetHub(repo: TankerRepository) {
     var customerPhone by remember { mutableStateOf("") }
     var customerAddress by remember { mutableStateOf("") }
     var customerMapsLink by remember { mutableStateOf("") }
+    var customerGpsLat by remember { mutableStateOf<Double?>(null) }
+    var customerGpsLng by remember { mutableStateOf<Double?>(null) }
     var customerLocLabel by remember { mutableStateOf("Home") }
     var customerTripRate by remember { mutableStateOf("") }
     var addingLocationForId by remember { mutableStateOf<Long?>(null) }
     var extraLocLabel by remember { mutableStateOf("") }
     var extraLocMaps by remember { mutableStateOf("") }
+    var extraGpsLat by remember { mutableStateOf<Double?>(null) }
+    var extraGpsLng by remember { mutableStateOf<Double?>(null) }
     var extraLocAddress by remember { mutableStateOf("") }
     var extraLocRate by remember { mutableStateOf("") }
     var boreName by remember { mutableStateOf("Main Bore") }
@@ -81,7 +91,47 @@ fun FleetHub(repo: TankerRepository) {
     var boreLng by remember { mutableStateOf("78.4867") }
     var msg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var gpsTarget by remember { mutableStateOf(0) } // 1 = new customer, 2 = extra location
+    val locationPermission = rememberLauncherForActivityResult(
+        ActivityResultContracts.RequestMultiplePermissions()
+    ) { grants ->
+        val ok = grants[Manifest.permission.ACCESS_FINE_LOCATION] == true
+                || grants[Manifest.permission.ACCESS_COARSE_LOCATION] == true
+        if (!ok) {
+            msg = "Location permission is needed for current GPS"
+            return@rememberLauncherForActivityResult
+        }
+        val loc = lastKnownLocation(context)
+        if (loc == null) {
+            msg = "Could not read GPS — turn on location and try again"
+            return@rememberLauncherForActivityResult
+        }
+        val lat = loc.latitude
+        val lng = loc.longitude
+        when (gpsTarget) {
+            1 -> {
+                customerGpsLat = loc.latitude
+                customerGpsLng = loc.longitude
+            }
+            2 -> {
+                extraGpsLat = loc.latitude
+                extraGpsLng = loc.longitude
+            }
+        }
+        msg = "GPS location ready — or paste a Maps link"
+    }
     val tabs = listOf("Tankers", "Bore", "Drivers", "Managers", "Customers")
+
+    fun requestGpsFor(target: Int) {
+        gpsTarget = target
+        locationPermission.launch(
+            arrayOf(
+                Manifest.permission.ACCESS_FINE_LOCATION,
+                Manifest.permission.ACCESS_COARSE_LOCATION
+            )
+        )
+    }
 
     fun refresh() {
         scope.launch {
@@ -93,6 +143,9 @@ fun FleetHub(repo: TankerRepository) {
     }
 
     LaunchedEffect(Unit) { refresh() }
+    LaunchedEffect(section) {
+        if (section == 4) refresh()
+    }
 
     ScreenScaffold(
         title = "Fleet",
@@ -236,50 +289,95 @@ fun FleetHub(repo: TankerRepository) {
                 }
             }
             else -> {
-                SoftField(customerName, { customerName = it }, "Customer name")
-                SoftField(customerPhone, { customerPhone = it }, "Customer phone")
-                SoftField(customerLocLabel, { customerLocLabel = it }, "Location shortcut (Home / Office / Site)")
-                SoftField(customerTripRate, { customerTripRate = it }, "Trip rate ₹ for this location")
-                SoftField(customerAddress, { customerAddress = it }, "Address / landmark (optional)")
-                SoftField(customerMapsLink, { customerMapsLink = it }, "Google Maps link (short or full)")
-                Text(
-                    "Paste WhatsApp Maps share link — short links work. Rate is per drop location; " +
-                        "changing rate later only affects new trips.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-                PrimaryButton("Save customer + first location", onClick = {
-                    scope.launch {
-                        repo.safe {
-                            upsertCustomer(
-                                CustomerRequest(
-                                    name = customerName.trim(),
-                                    phone = customerPhone.trim(),
-                                    defaultAddress = customerAddress.trim().ifBlank { null },
-                                    mapsLink = customerMapsLink.trim().ifBlank { null },
-                                    locationLabel = customerLocLabel.trim().ifBlank { "Delivery" }
-                                )
-                            )
-                        }.onSuccess { saved ->
-                            val rate = customerTripRate.toDoubleOrNull()
-                            val locId = saved.locations?.firstOrNull()?.id
-                            if (rate != null && locId != null) {
-                                repo.safe {
-                                    updateCustomerLocation(
-                                        saved.id,
-                                        locId,
-                                        CustomerLocationRequest(tripRate = rate)
-                                    )
-                                }
+                LazyColumn(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    item {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            SoftField(customerName, { customerName = it }, "Customer name")
+                            SoftField(customerPhone, { customerPhone = it }, "Customer phone")
+                            SoftField(customerLocLabel, { customerLocLabel = it }, "Location shortcut (Home / Office / Site)")
+                            SoftField(customerTripRate, { customerTripRate = it }, "Trip rate ₹ for this location")
+                            SoftField(customerAddress, { customerAddress = it }, "Address / landmark (optional)")
+                            SoftField(customerMapsLink, { customerMapsLink = it }, "Paste Google Maps link from WhatsApp")
+                            TextButton(onClick = { requestGpsFor(1) }) {
+                                Text("Or use current phone location")
                             }
-                            customerName = ""; customerPhone = ""; customerAddress = ""
-                            customerMapsLink = ""; customerLocLabel = "Home"; customerTripRate = ""
-                            refresh(); msg = "Customer & delivery location saved"
-                        }.onFailure { msg = it.message }
+                            Text(
+                                "Only paste the shared Maps link — the app reads the pin automatically. " +
+                                    "Trip rate is per drop; changes apply to new trips only.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            PrimaryButton("Save customer + first location", onClick = {
+                                if (customerMapsLink.isBlank() && (customerGpsLat == null || customerGpsLng == null)) {
+                                    msg = "Paste the Google Maps link or use current location"
+                                    return@PrimaryButton
+                                }
+                                scope.launch {
+                                    msg = if (customerMapsLink.isNotBlank()) "Reading location from Maps link…" else null
+                        val (link, lat, lng) = MapsLinkResolver.resolveForApi(
+                            context,
+                            customerMapsLink,
+                                        customerGpsLat,
+                                        customerGpsLng
+                                    )
+                        if (link.isNullOrBlank() && (lat == null || lng == null)) {
+                            msg = "Paste the Google Maps link or use current location"
+                            return@launch
+                        }
+                        if (lat == null || lng == null) {
+                            msg = "Could not read this Maps link. Open it in Google Maps, tap Share, and paste again — or use current location."
+                            return@launch
+                        }
+                        repo.safe {
+                                        upsertCustomer(
+                                            CustomerRequest(
+                                                name = customerName.trim(),
+                                                phone = customerPhone.trim(),
+                                                defaultAddress = customerAddress.trim().ifBlank { null },
+                                                defaultLat = lat,
+                                                defaultLng = lng,
+                                                mapsLink = link,
+                                                locationLabel = customerLocLabel.trim().ifBlank { "Delivery" }
+                                            )
+                                        )
+                                    }.onSuccess { saved ->
+                                        val rate = customerTripRate.toDoubleOrNull()
+                                        val locId = saved.locations?.firstOrNull()?.id
+                                        if (rate != null && locId != null) {
+                                            repo.safe {
+                                                updateCustomerLocation(
+                                                    saved.id,
+                                                    locId,
+                                                    CustomerLocationRequest(tripRate = rate)
+                                                )
+                                            }
+                                        }
+                                        customerName = ""; customerPhone = ""; customerAddress = ""
+                                        customerMapsLink = ""
+                                        customerGpsLat = null; customerGpsLng = null
+                                        customerLocLabel = "Home"; customerTripRate = ""
+                                        refresh(); msg = "Customer & delivery location saved"
+                                    }.onFailure { msg = it.message }
+                                }
+                            })
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                "Saved customers (${customers.size})",
+                                fontWeight = FontWeight.SemiBold,
+                                style = MaterialTheme.typography.titleMedium
+                            )
+                            if (customers.isEmpty()) {
+                                Text(
+                                    "No customers yet — save one above. Each customer can have multiple delivery sites.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
                     }
-                })
-                Spacer(modifier = Modifier.height(12.dp))
-                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(customers, key = { it.id }) { c ->
                         GlassCard {
                             Text(c.name ?: "Customer", fontWeight = FontWeight.Bold)
@@ -288,6 +386,11 @@ fun FleetHub(repo: TankerRepository) {
                             if (locs.isEmpty()) {
                                 Text(c.defaultAddress ?: "No locations yet", color = MaterialTheme.colorScheme.onSurfaceVariant)
                             } else {
+                                Text(
+                                    "Delivery sites (${locs.size})",
+                                    fontWeight = FontWeight.Medium,
+                                    style = MaterialTheme.typography.labelLarge
+                                )
                                 locs.forEach { loc ->
                                     Text(
                                         "• ${loc.label}: ${loc.address}" +
@@ -301,26 +404,48 @@ fun FleetHub(repo: TankerRepository) {
                                 SoftField(extraLocLabel, { extraLocLabel = it }, "New location shortcut name")
                                 SoftField(extraLocAddress, { extraLocAddress = it }, "Landmark (optional)")
                                 SoftField(extraLocRate, { extraLocRate = it }, "Trip rate ₹")
-                                SoftField(extraLocMaps, { extraLocMaps = it }, "Google Maps link")
+                                SoftField(extraLocMaps, { extraLocMaps = it }, "Paste Google Maps link")
+                                TextButton(onClick = { requestGpsFor(2) }) {
+                                    Text("Or use current phone location")
+                                }
                                 PrimaryButton("Add this location", onClick = {
-                                    if (extraLocMaps.isBlank()) {
-                                        msg = "Maps link required for new location"
+                                    if (extraLocMaps.isBlank() && (extraGpsLat == null || extraGpsLng == null)) {
+                                        msg = "Paste the Google Maps link or use current location"
                                         return@PrimaryButton
                                     }
                                     scope.launch {
-                                        repo.safe {
+                                        msg = if (extraLocMaps.isNotBlank()) "Reading location from Maps link…" else null
+                                        val (link, lat, lng) = MapsLinkResolver.resolveForApi(
+                                            context,
+                                            extraLocMaps,
+                                            extraGpsLat,
+                                            extraGpsLng
+                                        )
+                        if (link.isNullOrBlank() && (lat == null || lng == null)) {
+                            msg = "Paste the Google Maps link or use current location"
+                            return@launch
+                        }
+                        if (lat == null || lng == null) {
+                            msg = "Could not read this Maps link. Open it in Google Maps, tap Share, and paste again — or use current location."
+                            return@launch
+                        }
+                        repo.safe {
                                             addCustomerLocation(
                                                 c.id,
                                                 CustomerLocationRequest(
                                                     label = extraLocLabel.trim().ifBlank { "Delivery" },
                                                     address = extraLocAddress.trim().ifBlank { null },
-                                                    mapsLink = extraLocMaps.trim(),
+                                                    mapsLink = link,
+                                                    latitude = lat,
+                                                    longitude = lng,
                                                     tripRate = extraLocRate.toDoubleOrNull()
                                                 )
                                             )
                                         }.onSuccess {
                                             addingLocationForId = null
-                                            extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""; extraLocRate = ""
+                                            extraLocLabel = ""; extraLocMaps = ""
+                                            extraGpsLat = null; extraGpsLng = null
+                                            extraLocAddress = ""; extraLocRate = ""
                                             refresh(); msg = "Location added — available when booking trips"
                                         }.onFailure { msg = it.message }
                                     }
@@ -328,6 +453,7 @@ fun FleetHub(repo: TankerRepository) {
                                 TextButton(onClick = {
                                     addingLocationForId = null
                                     extraLocLabel = ""; extraLocMaps = ""; extraLocAddress = ""; extraLocRate = ""
+                                    extraGpsLat = null; extraGpsLng = null
                                 }) { Text("Cancel") }
                             } else {
                                 TextButton(onClick = {

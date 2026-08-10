@@ -98,8 +98,10 @@ public class FleetService {
         customer.setDefaultLng(req.getDefaultLng());
         customer.setActive(true);
 
-        if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
-            var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
+        if (req.getMapsLink() != null && !req.getMapsLink().isBlank()
+                || req.getDefaultLat() != null && req.getDefaultLng() != null) {
+            var coords = com.tankermanager.util.MapsLinkParser.resolve(
+                    req.getDefaultLat(), req.getDefaultLng(), req.getMapsLink());
             customer.setDefaultLat(coords.latitude());
             customer.setDefaultLng(coords.longitude());
             if (customer.getDefaultAddress() == null || customer.getDefaultAddress().isBlank()) {
@@ -111,8 +113,10 @@ public class FleetService {
 
         customer = customerRepository.save(customer);
 
-        if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
-            var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
+        if (req.getMapsLink() != null && !req.getMapsLink().isBlank()
+                || req.getDefaultLat() != null && req.getDefaultLng() != null) {
+            var coords = com.tankermanager.util.MapsLinkParser.resolve(
+                    req.getDefaultLat(), req.getDefaultLng(), req.getMapsLink());
             String label = (req.getLocationLabel() != null && !req.getLocationLabel().isBlank())
                     ? req.getLocationLabel().trim()
                     : "Delivery";
@@ -125,22 +129,7 @@ public class FleetService {
                     .address(address)
                     .latitude(coords.latitude())
                     .longitude(coords.longitude())
-                    .mapsLink(req.getMapsLink().trim())
-                    .active(true)
-                    .build());
-        } else if (req.getDefaultLat() != null && req.getDefaultLng() != null) {
-            String label = (req.getLocationLabel() != null && !req.getLocationLabel().isBlank())
-                    ? req.getLocationLabel().trim()
-                    : "Delivery";
-            String address = (req.getDefaultAddress() != null && !req.getDefaultAddress().isBlank())
-                    ? req.getDefaultAddress().trim()
-                    : label;
-            customerLocationRepository.save(CustomerLocation.builder()
-                    .customer(customer)
-                    .label(label)
-                    .address(address)
-                    .latitude(req.getDefaultLat())
-                    .longitude(req.getDefaultLng())
+                    .mapsLink(req.getMapsLink() != null ? req.getMapsLink().trim() : null)
                     .active(true)
                     .build());
         }
@@ -160,14 +149,9 @@ public class FleetService {
         BigDecimal lat = req.getLatitude();
         BigDecimal lng = req.getLongitude();
         String mapsLink = req.getMapsLink();
-        if (mapsLink != null && !mapsLink.isBlank()) {
-            var coords = com.tankermanager.util.MapsLinkParser.parse(mapsLink);
-            lat = coords.latitude();
-            lng = coords.longitude();
-        }
-        if (lat == null || lng == null) {
-            throw new BadRequestException("Provide a Google Maps link or latitude/longitude");
-        }
+        var coords = com.tankermanager.util.MapsLinkParser.resolve(lat, lng, mapsLink);
+        lat = coords.latitude();
+        lng = coords.longitude();
 
         String label = (req.getLabel() != null && !req.getLabel().isBlank()) ? req.getLabel().trim() : "Delivery";
         String address = (req.getAddress() != null && !req.getAddress().isBlank())

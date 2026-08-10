@@ -252,14 +252,5 @@ fun DriverHomeScreen(repo: TankerRepository, onLogout: () -> Unit) {
     }
 }
 
-@SuppressLint("MissingPermission")
-private fun currentLocation(context: android.content.Context): Location? {
-    val fine = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_FINE_LOCATION)
-    val coarse = ContextCompat.checkSelfPermission(context, Manifest.permission.ACCESS_COARSE_LOCATION)
-    if (fine != PackageManager.PERMISSION_GRANTED && coarse != PackageManager.PERMISSION_GRANTED) {
-        return null
-    }
-    val lm = context.getSystemService(LocationManager::class.java) ?: return null
-    return lm.getLastKnownLocation(LocationManager.GPS_PROVIDER)
-        ?: lm.getLastKnownLocation(LocationManager.NETWORK_PROVIDER)
-}
+private fun currentLocation(context: android.content.Context): Location? =
+    com.tankermanager.app.util.lastKnownLocation(context)

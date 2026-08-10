@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -66,6 +67,7 @@ import com.tankermanager.app.data.model.BoreExpenseResponse
 import com.tankermanager.app.data.model.BoreRequest
 import com.tankermanager.app.data.model.BoreResponse
 import com.tankermanager.app.data.model.BookTripRequest
+import com.tankermanager.app.util.MapsLinkResolver
 import com.tankermanager.app.data.model.CreateStaffRequest
 import com.tankermanager.app.data.model.CustomerResponse
 import com.tankermanager.app.data.model.DashboardResponse
@@ -388,39 +390,19 @@ private fun BookTripSheet(
     var customerMenuOpen by remember { mutableStateOf(false) }
     var locationMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
+    val context = androidx.compose.ui.platform.LocalContext.current
 
     val selectedCustomer = customers.firstOrNull { it.id == selectedCustomerId }
     val locations = selectedCustomer?.locations.orEmpty()
     val selectedLocation = locations.firstOrNull { it.id == selectedLocationId }
 
     LaunchedEffect(Unit) {
-        repo.safe { customers() }.onSuccess {
-            customers = it
-            selectedCustomerId = it.firstOrNull()?.id
-            phone = it.firstOrNull()?.phone.orEmpty()
-            name = it.firstOrNull()?.name.orEmpty()
-            selectedLocationId = it.firstOrNull()?.locations?.firstOrNull()?.id
-            address = it.firstOrNull()?.locations?.firstOrNull()?.address.orEmpty()
-        }
-        repo.safe { tankers() }.onSuccess {
-            tankers = it.filter { t -> t.status == "AVAILABLE" }
-            tankerId = tankers.firstOrNull()?.id
-        }
-        val available = repo.safe { availableDrivers() }
-        if (available.isSuccess) {
-            drivers = available.getOrDefault(emptyList())
-            driverId = drivers.firstOrNull()?.id
-        } else {
-            val all = repo.safe { drivers() }
-            if (all.isSuccess) {
-                drivers = all.getOrDefault(emptyList()).filter { d -> d.available != false }
-                driverId = drivers.firstOrNull()?.id
-            } else {
-                error = available.exceptionOrNull()?.message
-                    ?: all.exceptionOrNull()?.message
-                    ?: "Could not load drivers"
+        repo.safe { customers() }.onSuccess { customers = it }
+        repo.safe { tankers() }.onSuccess { tankers = it }
+        repo.safe { drivers() }.onSuccess { drivers = it }
+            .onFailure {
+                error = it.message ?: "Could not load drivers"
             }
-        }
     }
 
     Box(
@@ -430,9 +412,16 @@ private fun BookTripSheet(
             .padding(16.dp),
         contentAlignment = Alignment.Center
     ) {
-        GlassCard {
+        GlassCard(
+            modifier = Modifier
+                .fillMaxWidth()
+                .fillMaxHeight(0.92f)
+        ) {
             Column(
-                modifier = Modifier.verticalScroll(rememberScrollState()),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(4.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Book a trip", style = MaterialTheme.typography.headlineMedium)
@@ -467,9 +456,8 @@ private fun BookTripSheet(
                                     selectedCustomerId = c.id
                                     phone = c.phone.orEmpty()
                                     name = c.name.orEmpty()
-                                    val first = c.locations.orEmpty().firstOrNull()
-                                    selectedLocationId = first?.id
-                                    address = first?.address.orEmpty()
+                                    selectedLocationId = null
+                                    address = ""
                                     mapsLink = ""
                                     customerMenuOpen = false
                                 }
@@ -485,7 +473,11 @@ private fun BookTripSheet(
                 }, "Or type customer phone")
                 SoftField(name, { name = it }, "Customer name (if new)")
 
-                Text("Delivery location", fontWeight = FontWeight.SemiBold)
+                Text(
+                    "Delivery location" +
+                        if (locations.isNotEmpty()) " (${locations.size} saved)" else "",
+                    fontWeight = FontWeight.SemiBold
+                )
                 if (locations.isEmpty()) {
                     Text(
                         "No saved sites — paste Maps link below or add location in Fleet → Customers.",
@@ -532,23 +524,51 @@ private fun BookTripSheet(
                 }, "Or paste new Google Maps link (short OK)")
 
                 Text("Select tanker", fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
-                    tankers.take(4).forEach { t ->
-                        FilterChip(
-                            selected = tankerId == t.id,
-                            onClick = { tankerId = t.id },
-                            label = { Text(t.vehicleNumber) }
-                        )
+                if (tankers.isEmpty()) {
+                    Text(
+                        "No tankers yet — add one in Fleet → Tankers.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        tankers.forEach { t ->
+                            val busy = t.status != null && t.status != "AVAILABLE"
+                            val statusLabel = if (busy) "On trip" else "Available"
+                            FilterChip(
+                                selected = tankerId == t.id,
+                                onClick = { if (!busy) tankerId = t.id },
+                                enabled = !busy,
+                                label = {
+                                    Text("${t.vehicleNumber} · $statusLabel")
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 }
                 Text("Select driver", fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    drivers.take(4).forEach { d ->
-                        FilterChip(
-                            selected = driverId == d.id,
-                            onClick = { driverId = d.id },
-                            label = { Text(d.fullName ?: d.phone ?: "Driver") }
-                        )
+                if (drivers.isEmpty()) {
+                    Text(
+                        "No drivers yet — owner adds drivers in Fleet.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        drivers.forEach { d ->
+                            val busy = d.available == false
+                            val statusLabel = if (busy) "On trip" else "Available"
+                            FilterChip(
+                                selected = driverId == d.id,
+                                onClick = { if (!busy) driverId = d.id },
+                                enabled = !busy,
+                                label = {
+                                    Text("${d.fullName ?: d.phone ?: "Driver"} · $statusLabel")
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
                     }
                 }
 
@@ -570,6 +590,16 @@ private fun BookTripSheet(
                     loading = true
                     error = null
                     scope.launch {
+                        val linkPaste = mapsLink.trim()
+                        if (selectedLocationId == null && linkPaste.isNotBlank()) {
+                            error = "Reading location from Maps link…"
+                        }
+                        val (link, dropLat, dropLng) = MapsLinkResolver.resolveForApi(
+                            context,
+                            linkPaste.ifBlank { null },
+                            null,
+                            null
+                        )
                         val result = repo.safe {
                             bookTrip(
                                 BookTripRequest(
@@ -579,7 +609,9 @@ private fun BookTripSheet(
                                     driverId = did,
                                     customerLocationId = selectedLocationId,
                                     dropAddress = address.trim().ifBlank { null },
-                                    mapsLink = mapsLink.trim().ifBlank { null }
+                                    dropLat = dropLat,
+                                    dropLng = dropLng,
+                                    mapsLink = link ?: linkPaste.ifBlank { null }
                                 )
                             )
                         }

@@ -88,8 +88,10 @@ public class TripService {
             if (tripAmount == null && loc.getTripRate() != null) {
                 tripAmount = loc.getTripRate();
             }
-        } else if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
-            var coords = com.tankermanager.util.MapsLinkParser.parse(req.getMapsLink());
+        } else if (req.getMapsLink() != null && !req.getMapsLink().isBlank()
+                || req.getDropLat() != null && req.getDropLng() != null) {
+            var coords = com.tankermanager.util.MapsLinkParser.resolve(
+                    req.getDropLat(), req.getDropLng(), req.getMapsLink());
             dropLat = coords.latitude();
             dropLng = coords.longitude();
             if (dropAddress == null || dropAddress.isBlank()) {

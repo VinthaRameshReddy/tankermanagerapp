@@ -18,8 +18,8 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /**
- * Extracts lat/lng from Google Maps share links, including short links
- * (maps.app.goo.gl / goo.gl/maps) by following redirects to the full URL.
+ * Extracts lat/lng from Google Maps share links (including short links),
+ * plain "lat,lng" text, or HTML from Maps redirect pages.
  */
 public final class MapsLinkParser {
 
@@ -28,14 +28,26 @@ public final class MapsLinkParser {
     private static final Pattern AT_COORDS = Pattern.compile("@(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)");
     private static final Pattern Q_COORDS = Pattern.compile("[?&]q=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)");
     private static final Pattern QUERY_COORDS = Pattern.compile("[?&]query=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)");
+    private static final Pattern CENTER_COORDS = Pattern.compile("[?&]center=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)");
+    private static final Pattern SLL_COORDS = Pattern.compile("[?&]sll=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)");
     private static final Pattern BANG_3D4D = Pattern.compile("!3d(-?\\d+\\.\\d+)!4d(-?\\d+\\.\\d+)");
+    private static final Pattern BANG_4D3D = Pattern.compile("!4d(-?\\d+\\.\\d+)!3d(-?\\d+\\.\\d+)");
     private static final Pattern LL = Pattern.compile("[?&]ll=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)");
     private static final Pattern DESTINATION = Pattern.compile(
             "destination=(-?\\d+\\.\\d+)%2C(-?\\d+\\.\\d+)|destination=(-?\\d+\\.\\d+),(-?\\d+\\.\\d+)");
-    private static final Pattern PLAIN_PAIR = Pattern.compile("(-?\\d{1,2}\\.\\d{3,}),\\s*(-?\\d{1,3}\\.\\d{3,})");
+    private static final Pattern PLAIN_PAIR = Pattern.compile("^\\s*(-?\\d{1,2}\\.\\d+)\\s*,\\s*(-?\\d{1,3}\\.\\d+)\\s*$");
+    private static final Pattern URL_IN_HTML = Pattern.compile(
+            "(?:https?://)?(?:maps\\.google\\.com|www\\.google\\.com/maps|maps\\.app\\.goo\\.gl|goo\\.gl|g\\.co)[^\"'\\s<>]+",
+            Pattern.CASE_INSENSITIVE);
+    private static final Pattern META_REFRESH = Pattern.compile(
+            "url=(https?://[^\"'>\\s]+)", Pattern.CASE_INSENSITIVE);
+    /** WhatsApp / share text — with or without https (e.g. goo.gl/AbCdEf). */
+    private static final Pattern URL_IN_SHARE_TEXT = Pattern.compile(
+            "((?:https?://)?(?:maps\\.app\\.goo\\.gl|goo\\.gl|g\\.co|www\\.google\\.com/maps|maps\\.google\\.com)[^\\s\"'<>]+)",
+            Pattern.CASE_INSENSITIVE);
 
     private static final HttpClient HTTP = HttpClient.newBuilder()
-            .connectTimeout(Duration.ofSeconds(8))
+            .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
@@ -44,106 +56,238 @@ public final class MapsLinkParser {
 
     public static Coords parse(String mapsLink) {
         if (mapsLink == null || mapsLink.isBlank()) {
-            throw new BadRequestException("Google Maps link is required");
+            throw new BadRequestException("Google Maps link or latitude,longitude is required");
         }
-        String raw = mapsLink.trim();
+        String raw = extractMapsUrl(mapsLink.trim());
+        Coords c = tryPlainCoordsOnly(raw);
+        if (c != null) {
+            return c;
+        }
         String decoded = decode(raw);
-
-        Coords c = tryPatterns(decoded);
+        c = tryPatterns(decoded);
         if (c == null) {
             c = tryPatterns(raw);
         }
         if (c == null && looksLikeShortOrMapsLink(raw)) {
-            String resolved = resolveRedirectChain(raw);
-            if (resolved != null && !resolved.equalsIgnoreCase(raw)) {
-                String resolvedDecoded = decode(resolved);
-                c = tryPatterns(resolvedDecoded);
-                if (c == null) {
-                    c = tryPatterns(resolved);
-                }
-            }
+            c = resolveViaHttp(raw);
         }
         if (c == null) {
             throw new BadRequestException(
                     "Could not read coordinates from this Maps link. "
-                            + "Short links (maps.app.goo.gl) are supported — check the link is valid, "
-                            + "or paste the full Maps link / latitude,longitude.");
+                            + "Share location from Google Maps again, or use current GPS in the app.");
         }
         return c;
     }
 
+    /**
+     * Prefer explicit coordinates; otherwise parse maps link / plain text.
+     */
+    public static Coords resolve(BigDecimal latitude, BigDecimal longitude, String mapsLink) {
+        if (latitude != null && longitude != null) {
+            return validate(latitude, longitude);
+        }
+        if (mapsLink != null && !mapsLink.isBlank()) {
+            return parse(mapsLink);
+        }
+        throw new BadRequestException("Provide a Google Maps link or latitude & longitude");
+    }
+
     public static boolean looksLikeMapsLink(String value) {
+        if (value == null || value.isBlank()) {
+            return false;
+        }
+        if (tryPlainCoordsOnly(value.trim()) != null) {
+            return false;
+        }
         return looksLikeShortOrMapsLink(value);
     }
 
-    private static boolean looksLikeShortOrMapsLink(String value) {
-        if (value == null) {
-            return false;
+    private static Coords validate(BigDecimal lat, BigDecimal lng) {
+        if (lat.abs().compareTo(BigDecimal.valueOf(90)) > 0
+                || lng.abs().compareTo(BigDecimal.valueOf(180)) > 0) {
+            throw new BadRequestException("Invalid latitude or longitude");
         }
-        String v = value.toLowerCase(Locale.ROOT);
-        return v.contains("maps.google") || v.contains("google.com/maps")
-                || v.contains("goo.gl/maps") || v.contains("maps.app.goo.gl")
-                || v.contains("maps.apple.com") || v.contains("g.co/maps");
+        return new Coords(lat.setScale(7, RoundingMode.HALF_UP), lng.setScale(7, RoundingMode.HALF_UP));
     }
 
-    private static boolean isShortLink(String value) {
-        String v = value.toLowerCase(Locale.ROOT);
-        return v.contains("maps.app.goo.gl") || v.contains("goo.gl/maps") || v.contains("g.co/maps");
-    }
-
-    /**
-     * Follows Location redirects manually (max 10 hops), only for Google Maps hosts (SSRF-safe).
-     * Tries to parse coords from each hop URL.
-     */
-    private static String resolveRedirectChain(String startUrl) {
-        String current = normalizeHttpUrl(startUrl);
-        if (current == null || !isAllowedMapsHost(hostOf(current))) {
+    private static Coords tryPlainCoordsOnly(String text) {
+        if (looksLikeShortOrMapsLink(text)) {
             return null;
         }
-        String lastUseful = current;
+        Matcher m = PLAIN_PAIR.matcher(text);
+        if (m.matches()) {
+            return coords(m.group(1), m.group(2));
+        }
+        return null;
+    }
+
+    private static String extractMapsUrl(String input) {
+        Matcher m = URL_IN_SHARE_TEXT.matcher(input);
+        if (m.find()) {
+            return trimTrailingUrlPunctuation(normalizeHttpUrl(m.group(1)));
+        }
+        String t = input.trim();
+        if (looksLikeShortOrMapsLink(t)) {
+            String n = normalizeHttpUrl(t);
+            return n != null ? n : t;
+        }
+        return t;
+    }
+
+    private static String trimTrailingUrlPunctuation(String url) {
+        if (url == null) {
+            return null;
+        }
+        String u = url;
+        while (!u.isEmpty() && ".,)>\"'".indexOf(u.charAt(u.length() - 1)) >= 0) {
+            u = u.substring(0, u.length() - 1);
+        }
+        return u;
+    }
+
+    private static boolean looksLikeShortOrMapsLink(String value) {
+        String v = value.toLowerCase(Locale.ROOT);
+        return v.contains("maps.google") || v.contains("google.com/maps")
+                || v.contains("goo.gl") || v.contains("maps.app.goo.gl")
+                || v.contains("maps.apple.com") || v.contains("g.co")
+                || v.startsWith("http://") || v.startsWith("https://");
+    }
+
+    private static Coords resolveViaHttp(String startUrl) {
+        String current = normalizeHttpUrl(startUrl);
+        if (current == null) {
+            return null;
+        }
         try {
-            for (int hop = 0; hop < 10; hop++) {
-                Coords already = tryPatterns(decode(current));
-                if (already == null) {
-                    already = tryPatterns(current);
+            hopLoop:
+            for (int hop = 0; hop < 15; hop++) {
+                Coords inUrl = tryPatterns(decode(current));
+                if (inUrl == null) {
+                    inUrl = tryPatterns(current);
                 }
-                if (already != null && !isShortLink(current)) {
-                    return current;
+                if (inUrl != null) {
+                    return inUrl;
+                }
+
+                if (!isAllowedMapsHost(hostOf(current))) {
+                    break;
                 }
 
                 HttpRequest request = HttpRequest.newBuilder(URI.create(current))
-                        .timeout(Duration.ofSeconds(12))
-                        .header("User-Agent", "TankerManager/1.0 (MapsLinkResolver)")
-                        .header("Accept", "text/html,application/xhtml+xml")
+                        .timeout(Duration.ofSeconds(15))
+                        .header("User-Agent", "Mozilla/5.0 (compatible; TankerManager/1.0; +maps-resolve)")
+                        .header("Accept", "text/html,application/xhtml+xml,*/*")
                         .GET()
                         .build();
-                HttpResponse<Void> response = HTTP.send(request, HttpResponse.BodyHandlers.discarding());
+                HttpResponse<String> response = HTTP.send(request, HttpResponse.BodyHandlers.ofString());
                 int status = response.statusCode();
+
                 if (status >= 300 && status < 400) {
                     String location = response.headers().firstValue("Location").orElse(null);
                     if (location == null || location.isBlank()) {
                         break;
                     }
                     String next = resolveRelative(current, location.trim());
-                    if (next == null || !isAllowedMapsHost(hostOf(next))) {
-                        log.warn("Refusing Maps redirect to non-Maps host: {}", location);
+                    if (next == null) {
                         break;
                     }
-                    lastUseful = next;
+                    Coords fromPlaceUrl = geocodePlaceQuery(extractPlaceQuery(next));
+                    if (fromPlaceUrl != null) {
+                        return fromPlaceUrl;
+                    }
                     current = next;
                     continue;
                 }
-                // Some short-link endpoints return 200 with HTML that still embeds the target URL
+
                 if (status >= 200 && status < 300) {
-                    return current;
+                    String body = response.body();
+                    if (body != null && !body.isBlank()) {
+                        Coords fromHtml = tryPatterns(body);
+                        if (fromHtml != null) {
+                            return fromHtml;
+                        }
+                        Matcher refresh = META_REFRESH.matcher(body);
+                        if (refresh.find()) {
+                            String target = decode(refresh.group(1));
+                            Coords c = tryPatterns(target);
+                            if (c != null) {
+                                return c;
+                            }
+                            current = normalizeHttpUrl(target);
+                            continue;
+                        }
+                        Matcher urlM = URL_IN_HTML.matcher(body);
+                        while (urlM.find()) {
+                            String found = decode(urlM.group());
+                            Coords c = tryPatterns(found);
+                            if (c != null) {
+                                return c;
+                            }
+                            String next = normalizeHttpUrl(found);
+                            if (next != null && !next.equals(current)) {
+                                current = next;
+                                continue hopLoop;
+                            }
+                        }
+                    }
+                    break;
                 }
                 break;
             }
         } catch (Exception e) {
-            log.warn("Failed to resolve Maps short link {}: {}", startUrl, e.toString());
-            return lastUseful;
+            log.warn("Maps link HTTP resolve failed for {}: {}", startUrl, e.toString());
         }
-        return lastUseful;
+        Coords fromPlace = geocodePlaceQuery(extractPlaceQuery(current));
+        if (fromPlace != null) {
+            return fromPlace;
+        }
+        return null;
+    }
+
+    private static final Pattern PLACE_PATH = Pattern.compile("/maps/place/([^/@?]+)", Pattern.CASE_INSENSITIVE);
+
+    private static String extractPlaceQuery(String url) {
+        if (url == null || url.isBlank()) {
+            return null;
+        }
+        Matcher m = PLACE_PATH.matcher(decode(url));
+        if (!m.find()) {
+            return null;
+        }
+        String segment = m.group(1);
+        int dataIdx = segment.indexOf("/data");
+        if (dataIdx >= 0) {
+            segment = segment.substring(0, dataIdx);
+        }
+        return segment.replace('+', ' ').trim();
+    }
+
+    private static Coords geocodePlaceQuery(String query) {
+        if (query == null || query.isBlank()) {
+            return null;
+        }
+        try {
+            String encoded = java.net.URLEncoder.encode(query.trim(), StandardCharsets.UTF_8);
+            HttpRequest req = HttpRequest.newBuilder(URI.create(
+                            "https://nominatim.openstreetmap.org/search?q=" + encoded + "&format=json&limit=1"))
+                    .timeout(Duration.ofSeconds(12))
+                    .header("User-Agent", "TankerManager/1.0")
+                    .GET()
+                    .build();
+            HttpResponse<String> res = HTTP.send(req, HttpResponse.BodyHandlers.ofString());
+            if (res.statusCode() < 200 || res.statusCode() >= 300) {
+                return null;
+            }
+            String body = res.body();
+            Matcher latM = Pattern.compile("\"lat\":\"([^\"]+)\"").matcher(body);
+            Matcher lonM = Pattern.compile("\"lon\":\"([^\"]+)\"").matcher(body);
+            if (latM.find() && lonM.find()) {
+                return coords(latM.group(1), lonM.group(1));
+            }
+        } catch (Exception e) {
+            log.debug("Place geocode failed for {}: {}", query, e.toString());
+        }
+        return null;
     }
 
     private static String normalizeHttpUrl(String raw) {
@@ -151,7 +295,11 @@ public final class MapsLinkParser {
         if (u.startsWith("//")) {
             u = "https:" + u;
         } else if (!u.startsWith("http://") && !u.startsWith("https://")) {
-            u = "https://" + u;
+            if (looksLikeShortOrMapsLink(u)) {
+                u = "https://" + u;
+            } else {
+                return null;
+            }
         }
         try {
             URI.create(u);
@@ -163,8 +311,7 @@ public final class MapsLinkParser {
 
     private static String resolveRelative(String base, String location) {
         try {
-            URI resolved = URI.create(base).resolve(location);
-            return resolved.toString();
+            return URI.create(base).resolve(location).toString();
         } catch (Exception e) {
             return normalizeHttpUrl(location);
         }
@@ -204,13 +351,24 @@ public final class MapsLinkParser {
     }
 
     private static Coords tryPatterns(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
         Coords c = match(AT_COORDS, text, 1, 2);
         if (c != null) return c;
+        c = match(BANG_3D4D, text, 1, 2);
+        if (c != null) return c;
+        Matcher b43 = BANG_4D3D.matcher(text);
+        if (b43.find()) {
+            return coords(b43.group(2), b43.group(1));
+        }
         c = match(Q_COORDS, text, 1, 2);
         if (c != null) return c;
         c = match(QUERY_COORDS, text, 1, 2);
         if (c != null) return c;
-        c = match(BANG_3D4D, text, 1, 2);
+        c = match(CENTER_COORDS, text, 1, 2);
+        if (c != null) return c;
+        c = match(SLL_COORDS, text, 1, 2);
         if (c != null) return c;
         c = match(LL, text, 1, 2);
         if (c != null) return c;
@@ -221,12 +379,9 @@ public final class MapsLinkParser {
             }
             return coords(dest.group(3), dest.group(4));
         }
-        // Avoid matching short-link path garbage as coords
-        if (!isShortLink(text)) {
-            Matcher plain = PLAIN_PAIR.matcher(text);
-            if (plain.find()) {
-                return coords(plain.group(1), plain.group(2));
-            }
+        Matcher plain = PLAIN_PAIR.matcher(text.trim());
+        if (plain.matches()) {
+            return coords(plain.group(1), plain.group(2));
         }
         return null;
     }

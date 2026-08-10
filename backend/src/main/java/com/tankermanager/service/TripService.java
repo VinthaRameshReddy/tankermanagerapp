@@ -466,6 +466,7 @@ public class TripService {
         return toResponse(trip, true);
     }
 
+    @Transactional(readOnly = true)
     public TrackingResponse publicTrack(String token) {
         Trip trip = tripRepository.findByTrackingToken(token)
                 .orElseThrow(() -> new ResourceNotFoundException("Invalid tracking link"));

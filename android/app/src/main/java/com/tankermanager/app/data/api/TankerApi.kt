@@ -96,6 +96,12 @@ interface TankerApi {
         @Body body: TripPaymentRequest
     ): TripResponse
 
+    @PATCH("api/manager/trips/{id}/amount")
+    suspend fun updateTripAmount(
+        @Path("id") id: Long,
+        @Body body: UpdateTripAmountRequest
+    ): TripResponse
+
     @GET("api/manager/expenses")
     suspend fun expenses(): List<ExpenseResponse>
 

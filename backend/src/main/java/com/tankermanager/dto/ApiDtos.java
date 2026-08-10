@@ -194,6 +194,12 @@ public final class ApiDtos {
     }
 
     @Data
+    public static class UpdateTripAmountRequest {
+        @NotNull
+        private BigDecimal tripAmount;
+    }
+
+    @Data
     @Builder
     public static class TripDueItem {
         private Long tripId;

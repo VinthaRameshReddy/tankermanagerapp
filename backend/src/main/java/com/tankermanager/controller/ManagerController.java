@@ -138,6 +138,11 @@ public class ManagerController {
         return tripService.recordPayment(id, request);
     }
 
+    @PatchMapping("/trips/{id}/amount")
+    public TripResponse updateTripAmount(@PathVariable Long id, @Valid @RequestBody UpdateTripAmountRequest request) {
+        return tripService.updateTripAmount(id, request.getTripAmount());
+    }
+
     // Expenses
     @PostMapping("/expenses")
     @ResponseStatus(HttpStatus.CREATED)

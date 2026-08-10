@@ -349,6 +349,13 @@ fun TripCard(trip: TripResponse, onOpen: () -> Unit, onTrack: () -> Unit) {
         Spacer(modifier = Modifier.height(8.dp))
         Text("${trip.tankerNumber ?: "—"}  •  ${trip.driverName ?: "—"}")
         Text(trip.dropAddress ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+        if ((trip.tripAmount ?: 0.0) > 0 || (trip.amountDue ?: 0.0) > 0) {
+            Text(
+                "₹${"%.0f".format(trip.tripAmount ?: 0.0)} trip" +
+                    (trip.amountDue?.takeIf { it > 0 }?.let { " · due ₹${"%.0f".format(it)}" } ?: ""),
+                fontWeight = FontWeight.Medium
+            )
+        }
         if (trip.distanceKm != null || trip.etaMinutes != null) {
             Text(
                 listOfNotNull(
@@ -381,6 +388,7 @@ private fun BookTripSheet(
     var name by remember { mutableStateOf("") }
     var mapsLink by remember { mutableStateOf("") }
     var address by remember { mutableStateOf("") }
+    var tripFare by remember { mutableStateOf("") }
     var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
     var drivers by remember { mutableStateOf<List<DriverResponse>>(emptyList()) }
     var tankerId by remember { mutableStateOf<Long?>(null) }
@@ -395,6 +403,10 @@ private fun BookTripSheet(
     val selectedCustomer = customers.firstOrNull { it.id == selectedCustomerId }
     val locations = selectedCustomer?.locations.orEmpty()
     val selectedLocation = locations.firstOrNull { it.id == selectedLocationId }
+
+    LaunchedEffect(selectedLocationId) {
+        selectedLocation?.tripRate?.let { tripFare = "%.0f".format(it) }
+    }
 
     LaunchedEffect(Unit) {
         repo.safe { customers() }.onSuccess { customers = it }
@@ -505,11 +517,17 @@ private fun BookTripSheet(
                         ) {
                             locations.forEach { loc ->
                                 DropdownMenuItem(
-                                    text = { Text("${loc.label ?: "Site"} — ${loc.address.orEmpty()}") },
+                                    text = {
+                                        Text(
+                                            "${loc.label ?: "Site"} — ${loc.address.orEmpty()}" +
+                                                (loc.tripRate?.let { " · ₹${"%.0f".format(it)}" } ?: "")
+                                        )
+                                    },
                                     onClick = {
                                         selectedLocationId = loc.id
                                         address = loc.address.orEmpty()
                                         mapsLink = ""
+                                        loc.tripRate?.let { tripFare = "%.0f".format(it) }
                                         locationMenuOpen = false
                                     }
                                 )
@@ -522,6 +540,13 @@ private fun BookTripSheet(
                     mapsLink = it
                     if (it.isNotBlank()) selectedLocationId = null
                 }, "Or paste new Google Maps link (short OK)")
+
+                SoftField(tripFare, { tripFare = it }, "Trip price ₹ (this trip)")
+                Text(
+                    "Filled from the location rate when you pick a site — change here for this trip only.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
 
                 Text("Select tanker", fontWeight = FontWeight.SemiBold)
                 if (tankers.isEmpty()) {
@@ -611,7 +636,8 @@ private fun BookTripSheet(
                                     dropAddress = address.trim().ifBlank { null },
                                     dropLat = dropLat,
                                     dropLng = dropLng,
-                                    mapsLink = link ?: linkPaste.ifBlank { null }
+                                    mapsLink = link ?: linkPaste.ifBlank { null },
+                                    tripAmount = tripFare.toDoubleOrNull()
                                 )
                             )
                         }

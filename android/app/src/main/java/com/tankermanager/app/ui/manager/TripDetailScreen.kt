@@ -32,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.tankermanager.app.data.model.TripPaymentRequest
+import com.tankermanager.app.data.model.UpdateTripAmountRequest
 import com.tankermanager.app.data.model.TripResponse
 import com.tankermanager.app.data.model.UpdateTripStatusRequest
 import com.tankermanager.app.data.repo.TankerRepository
@@ -60,6 +61,7 @@ fun TripDetailScreen(
     var error by remember { mutableStateOf<String?>(null) }
     var loading by remember { mutableStateOf(false) }
     var payAmount by remember { mutableStateOf("") }
+    var fareEdit by remember { mutableStateOf("") }
     var payMsg by remember { mutableStateOf<String?>(null) }
     val scope = rememberCoroutineScope()
 
@@ -72,6 +74,10 @@ fun TripDetailScreen(
     }
 
     LaunchedEffect(tripId) { load() }
+
+    LaunchedEffect(trip?.tripAmount) {
+        trip?.tripAmount?.let { fareEdit = "%.0f".format(it) }
+    }
 
     val t = trip
     ScreenScaffold(
@@ -119,6 +125,28 @@ fun TripDetailScreen(
 
             GlassCard {
                 Text("Payment for this trip", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                SoftField(fareEdit, { fareEdit = it }, "Trip price ₹")
+                CoralButton("Save trip price", onClick = {
+                    val amt = fareEdit.toDoubleOrNull()
+                    if (amt == null || amt < 0) {
+                        payMsg = "Enter a valid trip price"
+                        return@CoralButton
+                    }
+                    loading = true
+                    payMsg = null
+                    scope.launch {
+                        repo.safe { updateTripAmount(tripId, UpdateTripAmountRequest(amt)) }
+                            .onSuccess {
+                                trip = it
+                                payMsg = "Trip price updated"
+                                loading = false
+                            }
+                            .onFailure {
+                                payMsg = it.message
+                                loading = false
+                            }
+                    }
+                })
                 Text("Fare ₹${"%.0f".format(t.tripAmount ?: 0.0)}")
                 Text("Paid ₹${"%.0f".format(t.amountPaid ?: 0.0)}")
                 Text(
@@ -149,6 +177,7 @@ fun TripDetailScreen(
                             }
                     }
                 })
+                ErrorBanner(payMsg)
             }
 
             val context = androidx.compose.ui.platform.LocalContext.current

@@ -386,6 +386,23 @@ public class TripService {
         return toResponse(trip, false);
     }
 
+    @Transactional
+    public TripResponse updateTripAmount(Long tripId, java.math.BigDecimal tripAmount) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Trip trip = tripRepository.findByIdAndOperatorId(tripId, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
+        if (tripAmount == null || tripAmount.compareTo(java.math.BigDecimal.ZERO) < 0) {
+            throw new BadRequestException("Trip price must be zero or greater");
+        }
+        java.math.BigDecimal paid = trip.getAmountPaid() != null ? trip.getAmountPaid() : java.math.BigDecimal.ZERO;
+        if (tripAmount.compareTo(paid) < 0) {
+            throw new BadRequestException("Trip price cannot be less than amount already paid (₹" + paid + ")");
+        }
+        trip.setTripAmount(tripAmount);
+        tripRepository.save(trip);
+        return toResponse(trip, false);
+    }
+
     @Transactional(readOnly = true)
     public CustomerDuesResponse customerDues(Long customerId) {
         Long operatorId = SecurityUtils.requireOperatorId();

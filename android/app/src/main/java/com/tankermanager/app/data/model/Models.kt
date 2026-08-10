@@ -211,6 +211,10 @@ data class TripPaymentRequest(
     val note: String? = null
 )
 
+data class UpdateTripAmountRequest(
+    val tripAmount: Double
+)
+
 data class TripDueItem(
     val tripId: Long?,
     val tripCode: String?,

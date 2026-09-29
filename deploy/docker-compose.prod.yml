@@ -1,0 +1,31 @@
+# Production compose for a single Lightsail VM.
+# Database: use Lightsail *managed* PostgreSQL — set DATABASE_URL on the api service.
+# Do not run Postgres in Docker for production unless you also manage backups.
+
+services:
+  api:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      DATABASE_URL: ${DATABASE_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      # Optional: JAVA_TOOL_OPTIONS: -Xmx768m
+    expose:
+      - "8080"
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/api-http-only.conf:/etc/nginx/conf.d/default.conf:ro
+      # After certbot: mount /etc/letsencrypt
+      # - ./web/dist:/usr/share/nginx/html:ro   # optional Angular build
+    depends_on:
+      - api

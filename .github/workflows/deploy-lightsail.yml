@@ -1,0 +1,54 @@
+# Build API Docker image and deploy to Lightsail via SSH.
+# Repository secrets required:
+#   LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY
+# On server: clone repo, create deploy/.env with DATABASE_URL and JWT_SECRET.
+
+name: Deploy API to Lightsail
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'backend/**'
+      - 'deploy/**'
+      - '.github/workflows/deploy-lightsail.yml'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build backend JAR with Maven
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: maven
+      - name: mvn package
+        working-directory: backend
+        run: mvn -q -DskipTests package
+
+      - name: Copy artifacts to server
+        if: ${{ secrets.LIGHTSAIL_HOST != '' }}
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: "backend/target/*.jar,deploy/*"
+          target: "/opt/tankermanager"
+          strip_components: 0
+
+      - name: Restart stack on server
+        if: ${{ secrets.LIGHTSAIL_HOST != '' }}
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            cd /opt/tankermanager/deploy
+            docker compose -f docker-compose.prod.yml build --no-cache api
+            docker compose -f docker-compose.prod.yml up -d

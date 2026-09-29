@@ -39,10 +39,12 @@ public class ProdDataSourceConfig {
         ds.setMaximumPoolSize(5);
         ds.setConnectionTimeout(60000);
         ds.setInitializationFailTimeout(30000);
-        // Render Postgres requires TLS on external connections
+        String sslMode = firstNonBlank(env.getProperty("DATABASE_SSL_MODE"), "require");
         ds.addDataSourceProperty("ssl", "true");
-        ds.addDataSourceProperty("sslmode", "require");
-        ds.addDataSourceProperty("sslfactory", "org.postgresql.ssl.NonValidatingFactory");
+        ds.addDataSourceProperty("sslmode", sslMode);
+        if ("require".equals(sslMode) || "verify-full".equals(sslMode)) {
+            ds.addDataSourceProperty("sslfactory", "org.postgresql.ssl.NonValidatingFactory");
+        }
 
         log.info("Prod datasource jdbcUrl={} user={}", parts.jdbcUrl, parts.username);
         return ds;

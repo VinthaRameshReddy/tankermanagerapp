@@ -30,13 +30,14 @@ fi
 
 sudo systemctl restart tankermanager-api
 
-# Spring Boot on 1 GB RAM can take 60–90s on cold start
-for _ in 1 2 3 4 5 6 8 10 12 15 18 20 25 30; do
+echo "Waiting for Spring Boot (1 GB RAM: often 60–120s after restart)..."
+sleep 10
+for i in $(seq 1 90); do
   if curl -sf http://127.0.0.1:8080/actuator/health >/dev/null; then
-    echo "Deploy OK — API healthy on :8080"
+    echo "Deploy OK — API healthy on :8080 (after ${i} checks)"
     exit 0
   fi
-  sleep 3
+  sleep 2
 done
 
 echo "API did not become healthy:"

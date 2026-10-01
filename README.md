@@ -22,7 +22,8 @@ mvn -s .mvn/settings.xml spring-boot:run
 - Swagger: http://localhost:8080/swagger-ui.html  
 - Super Admin: phone `9999999999` / password `Admin@123`  
 - Deploy (dev/staging): `backend/render.yaml` + Docker (Java 17)  
-- Deploy (low-cost prod): **[docs/LIGHTSAIL_POSTGRES_SETUP.md](docs/LIGHTSAIL_POSTGRES_SETUP.md)** — step-by-step Lightsail + PostgreSQL  
+- Deploy (low-cost prod): **[docs/LIGHTSAIL_SINGLE_SERVER.md](docs/LIGHTSAIL_SINGLE_SERVER.md)** — one Lightsail VM + local PostgreSQL (~$12/mo)  
+- Cursor SSH Stage 1: [docs/CURSOR_SSH_STAGE1.md](docs/CURSOR_SSH_STAGE1.md)  
 - Architecture overview: [docs/PRODUCTION_LOW_COST.md](docs/PRODUCTION_LOW_COST.md)
 
 ## Android (TankerFlow)

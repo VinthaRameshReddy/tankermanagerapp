@@ -1,0 +1,61 @@
+# Lightsail: one server + PostgreSQL on the same VM
+
+**No separate $15 Lightsail database.** Everything on one Ubuntu instance (~**$12/month** plan).
+
+```text
+Internet → Nginx (:80/443) → Spring Boot (:8080) → PostgreSQL (localhost:5432 only)
+```
+
+## AWS setup (browser only)
+
+1. Region: **Mumbai (ap-south-1)**
+2. **Instances** → Create **Ubuntu 24.04** (or 22.04), **$12** plan (2 GB RAM recommended; if you use 1 GB, swap from Stage 1 is required)
+3. **Static IP** → attach
+4. Firewall: **22, 80, 443** — **do not** open **5432**
+5. **Skip** Lightsail **Databases** ($15 plan) — delete/cancel if you already created one
+
+## Cursor Remote-SSH
+
+1. `ssh ubuntu@YOUR_STATIC_IP` with Lightsail **.pem**
+2. See **[CURSOR_SSH_STAGE1.md](CURSOR_SSH_STAGE1.md)** — run `stage1-server-prep.sh`
+3. Stage 2 — database on same machine:
+
+```bash
+cd ~/tankermanagerapp/deploy
+export TANKER_DB_PASSWORD='choose-a-strong-password'
+bash stage2-create-local-db.sh
+```
+
+4. App environment (later, Stage 3):
+
+```env
+DATABASE_URL=postgresql://tanker:YOUR_PASSWORD@localhost:5432/tankermanager
+DATABASE_SSL_MODE=disable
+JWT_SECRET=...
+SPRING_PROFILES_ACTIVE=prod
+```
+
+Password with special characters must be **URL-encoded** in `DATABASE_URL`.
+
+## Migrate from Render (optional)
+
+From a machine that can reach both DBs:
+
+```bash
+pg_dump "RENDER_EXTERNAL_URL" --no-owner --no-acl -f backup.sql
+psql "postgresql://tanker:PASS@YOUR_SERVER_IP:5432/tankermanager" -f backup.sql
+```
+
+For import, SSH tunnel or run `psql` **on the server** as `ubuntu` using `localhost`.
+
+## Android app
+
+`BASE_URL` = `http://YOUR_STATIC_IP/` (or `https://api.yourdomain.com/` after SSL).
+
+## Cost
+
+| Item | Cost |
+|------|------|
+| Lightsail instance | ~$12/mo |
+| Managed DB | **$0** (not used) |
+| **Total** | ~**$12/mo** (+ domain optional) |

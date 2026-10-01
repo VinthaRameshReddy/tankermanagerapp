@@ -26,16 +26,29 @@ export TANKER_DB_PASSWORD='choose-a-strong-password'
 bash stage2-create-local-db.sh
 ```
 
-4. App environment (later, Stage 3):
+4. Stage 3 — one-time app layout + Nginx + systemd (creates `/opt/tankermanager/deploy/.env`):
 
-```env
-DATABASE_URL=postgresql://tanker:YOUR_PASSWORD@localhost:5432/tankermanager
-DATABASE_SSL_MODE=disable
-JWT_SECRET=...
-SPRING_PROFILES_ACTIVE=prod
+```bash
+cd ~/tankermanagerapp/deploy
+export TANKER_DB_PASSWORD='same-as-stage-2'
+bash stage3-app-setup.sh
 ```
 
-Password with special characters must be **URL-encoded** in `DATABASE_URL`.
+## GitHub auto-deploy (every push to `main`)
+
+After Stage 3, add **repository secrets** (GitHub → **Settings → Secrets and variables → Actions**):
+
+| Secret | Value |
+|--------|--------|
+| `LIGHTSAIL_HOST` | Static IP, e.g. `13.203.91.129` |
+| `LIGHTSAIL_USER` | `ubuntu` |
+| `LIGHTSAIL_SSH_KEY` | Entire `.pem` file (private key text) |
+
+Workflow: [`.github/workflows/deploy-lightsail.yml`](../.github/workflows/deploy-lightsail.yml)
+
+- **Push to `main`** → builds JAR → uploads to server → restarts `tankermanager-api`
+- **Android** is not deployed by GitHub; rebuild APK and set `BASE_URL` locally
+- DB password and `JWT_SECRET` stay **only** on the server in `/opt/tankermanager/deploy/.env` (never in GitHub)
 
 ## Migrate from Render (optional)
 

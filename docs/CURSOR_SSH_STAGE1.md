@@ -43,7 +43,7 @@ bash stage1-server-prep.sh
 bash stage1-verify-output.sh
 ```
 
-Copy the full output for **Stage 2** (database + migrate from Render + Spring Boot JAR).
+Copy the full output for **Stage 2**, then run **Stage 3** (`stage3-app-setup.sh`) and add GitHub secrets — see [LIGHTSAIL_SINGLE_SERVER.md](LIGHTSAIL_SINGLE_SERVER.md).
 
 ## Do NOT approve in Stage 1
 

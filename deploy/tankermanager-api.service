@@ -1,0 +1,17 @@
+[Unit]
+Description=Tanker Manager API (Spring Boot)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/opt/tankermanager/api
+EnvironmentFile=/opt/tankermanager/deploy/.env
+Environment=SPRING_PROFILES_ACTIVE=prod
+ExecStart=/usr/bin/java -XX:+UseContainerSupport -XX:MaxRAMPercentage=75.0 -jar /opt/tankermanager/api/tanker-manager-1.0.0.jar
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

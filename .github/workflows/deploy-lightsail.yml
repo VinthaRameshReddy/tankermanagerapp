@@ -1,18 +1,13 @@
-# Build API Docker image and deploy to Lightsail via SSH.
-# Repository secrets required:
-#   LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY
-# On server: clone repo, create deploy/.env with DATABASE_URL and JWT_SECRET.
+# Auto-deploy API to Lightsail on every push to main.
+# One-time on server: stage1 → stage2 → stage3-app-setup.sh
+# GitHub Secrets: LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY
 
 name: Deploy API to Lightsail
 
 on:
-  workflow_dispatch:
   push:
     branches: [main]
-    paths:
-      - 'backend/**'
-      - 'deploy/**'
-      - '.github/workflows/deploy-lightsail.yml'
+  workflow_dispatch:
 
 jobs:
   deploy:
@@ -20,35 +15,65 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build backend JAR with Maven
+      - name: Require Lightsail secrets
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+        run: |
+          if [ -z "$LIGHTSAIL_HOST" ] || [ -z "$LIGHTSAIL_USER" ] || [ -z "$LIGHTSAIL_SSH_KEY" ]; then
+            echo "::error::Add repository secrets: LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY"
+            echo "See docs/LIGHTSAIL_SINGLE_SERVER.md → GitHub auto-deploy"
+            exit 1
+          fi
+
+      - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "17"
           cache: maven
-      - name: mvn package
+
+      - name: Build JAR
         working-directory: backend
         run: mvn -q -DskipTests package
 
-      - name: Copy artifacts to server
-        if: ${{ secrets.LIGHTSAIL_HOST != '' }}
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.LIGHTSAIL_HOST }}
-          username: ${{ secrets.LIGHTSAIL_USER }}
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-          source: "backend/target/*.jar,deploy/*"
-          target: "/opt/tankermanager"
-          strip_components: 0
-
-      - name: Restart stack on server
-        if: ${{ secrets.LIGHTSAIL_HOST != '' }}
+      - name: Prepare remote directories
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.LIGHTSAIL_HOST }}
           username: ${{ secrets.LIGHTSAIL_USER }}
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
           script: |
-            cd /opt/tankermanager/deploy
-            docker compose -f docker-compose.prod.yml build --no-cache api
-            docker compose -f docker-compose.prod.yml up -d
+            sudo mkdir -p /opt/tankermanager/api /opt/tankermanager/deploy/nginx
+            sudo chown -R ubuntu:ubuntu /opt/tankermanager
+
+      - name: Upload JAR
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: "backend/target/tanker-manager-1.0.0.jar"
+          target: "/opt/tankermanager/api"
+          strip_components: 2
+
+      - name: Upload deploy scripts
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: "deploy/github-deploy-restart.sh,deploy/tankermanager-api.service,deploy/nginx/tankermanager-host.conf"
+          target: "/opt/tankermanager/deploy"
+          strip_components: 1
+
+      - name: Restart API on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            chmod +x /opt/tankermanager/deploy/github-deploy-restart.sh
+            bash /opt/tankermanager/deploy/github-deploy-restart.sh

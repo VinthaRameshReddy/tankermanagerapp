@@ -21,9 +21,13 @@ cd tankermanagerapp/deploy
 bash stage1-server-prep.sh
 export TANKER_DB_PASSWORD='your-strong-password'
 bash stage2-create-local-db.sh
+export TANKER_DB_PASSWORD='same-password'
+bash stage3-app-setup.sh
 ```
 
-App will use:
+Add GitHub secrets `LIGHTSAIL_HOST`, `LIGHTSAIL_USER`, `LIGHTSAIL_SSH_KEY` — then every **push to `main`** deploys the API.
+
+App uses (written by stage 3):
 
 ```text
 DATABASE_URL=postgresql://tanker:PASSWORD@localhost:5432/tankermanager

@@ -117,11 +117,8 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
         with:
-          # Do not install legacy "tools" package (removed from modern cmdline-tools).
-          packages: |
-            platform-tools
-            platforms;android-35
-            build-tools;35.0.0
+          # Space-separated (multiline is treated as one package name by sdkmanager).
+          packages: platform-tools platforms;android-35 build-tools;35.0.0
 
       - name: Assemble debug APK
         working-directory: android

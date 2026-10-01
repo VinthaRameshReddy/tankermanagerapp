@@ -21,7 +21,7 @@ cd tankermanagerapp/deploy
 bash stage1-server-prep.sh
 export TANKER_DB_PASSWORD='your-strong-password'
 bash stage2-create-local-db.sh
-export TANKER_DB_PASSWORD='same-password'
+export TANKER_DB_PASSWORD='your-strong-password'
 bash stage3-app-setup.sh
 ```
 

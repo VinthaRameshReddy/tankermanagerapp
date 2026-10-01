@@ -22,7 +22,7 @@ Internet → Nginx (:80/443) → Spring Boot (:8080) → PostgreSQL (localhost:5
 
 ```bash
 cd ~/tankermanagerapp/deploy
-export TANKER_DB_PASSWORD='choose-a-strong-password'
+export TANKER_DB_PASSWORD='your-strong-password'
 bash stage2-create-local-db.sh
 ```
 
@@ -30,7 +30,7 @@ bash stage2-create-local-db.sh
 
 ```bash
 cd ~/tankermanagerapp/deploy
-export TANKER_DB_PASSWORD='same-as-stage-2'
+export TANKER_DB_PASSWORD='your-strong-password'
 bash stage3-app-setup.sh
 ```
 

@@ -46,8 +46,9 @@ After Stage 3, add **repository secrets** (GitHub → **Settings → Secrets and
 
 Workflow: [`.github/workflows/deploy-lightsail.yml`](../.github/workflows/deploy-lightsail.yml)
 
-- **Push to `main`** → builds JAR → uploads to server → restarts `tankermanager-api`
-- **Android** is not deployed by GitHub; rebuild APK and set `BASE_URL` locally
+- **Push to `main`** → deploys API **and** builds a **debug APK** (Actions → workflow run → **Artifacts** → `tankerflow-debug-apk`)
+- APK `BASE_URL` = `http://LIGHTSAIL_HOST/` unless you set optional secret `API_PUBLIC_BASE_URL` (e.g. `https://api.yourdomain.com/`)
+- Local builds: set `API_BASE_URL` in `android/gradle.properties`
 - DB password and `JWT_SECRET` stay **only** on the server in `/opt/tankermanager/deploy/.env` (never in GitHub)
 
 ## Migrate from Render (optional)

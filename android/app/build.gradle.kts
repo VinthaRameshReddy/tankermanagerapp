@@ -14,8 +14,12 @@ android {
         targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
-        // Emulator local API. Real phone / Render:
-        buildConfigField("String", "BASE_URL", "\"https://tanker-manager-api-4nvy.onrender.com/\"")
+        val apiBaseUrl = (
+            project.findProperty("API_BASE_URL") as String?
+                ?: System.getenv("API_BASE_URL")
+                ?: "http://13.203.91.129/"
+            ).let { url -> if (url.endsWith("/")) url else "$url/" }
+        buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
     }
 
     buildTypes {

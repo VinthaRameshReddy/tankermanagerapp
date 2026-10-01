@@ -1,79 +1,132 @@
-# Auto-deploy API to Lightsail on every push to main.
-# One-time on server: stage1 → stage2 → stage3-app-setup.sh
-# GitHub Secrets: LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY
-
-name: Deploy API to Lightsail
-
-on:
-  push:
-    branches: [main]
-  workflow_dispatch:
-
-jobs:
-  deploy:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Require Lightsail secrets
-        env:
-          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
-          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
-          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-        run: |
-          if [ -z "$LIGHTSAIL_HOST" ] || [ -z "$LIGHTSAIL_USER" ] || [ -z "$LIGHTSAIL_SSH_KEY" ]; then
-            echo "::error::Add repository secrets: LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY"
-            echo "See docs/LIGHTSAIL_SINGLE_SERVER.md → GitHub auto-deploy"
-            exit 1
-          fi
-
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: "17"
-          cache: maven
-
-      - name: Build JAR
-        working-directory: backend
-        run: mvn -q -DskipTests package
-
-      - name: Prepare remote directories
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.LIGHTSAIL_HOST }}
-          username: ${{ secrets.LIGHTSAIL_USER }}
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-          script: |
-            sudo mkdir -p /opt/tankermanager/api /opt/tankermanager/deploy/nginx
-            sudo chown -R ubuntu:ubuntu /opt/tankermanager
-
-      - name: Upload JAR
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.LIGHTSAIL_HOST }}
-          username: ${{ secrets.LIGHTSAIL_USER }}
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-          source: "backend/target/tanker-manager-1.0.0.jar"
-          target: "/opt/tankermanager/api"
-          strip_components: 2
-
-      - name: Upload deploy scripts
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.LIGHTSAIL_HOST }}
-          username: ${{ secrets.LIGHTSAIL_USER }}
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-          source: "deploy/github-deploy-restart.sh,deploy/tankermanager-api.service,deploy/nginx/tankermanager-host.conf"
-          target: "/opt/tankermanager/deploy"
-          strip_components: 1
-
-      - name: Restart API on server
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.LIGHTSAIL_HOST }}
-          username: ${{ secrets.LIGHTSAIL_USER }}
-          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
-          script: |
-            chmod +x /opt/tankermanager/deploy/github-deploy-restart.sh
-            bash /opt/tankermanager/deploy/github-deploy-restart.sh
+# Auto-deploy API + build debug APK on every push to main.
+# Secrets: LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY
+# Optional: API_PUBLIC_BASE_URL (https domain) — else APK uses http://LIGHTSAIL_HOST/
+
+name: Deploy API to Lightsail
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  deploy-api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require Lightsail secrets
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          LIGHTSAIL_USER: ${{ secrets.LIGHTSAIL_USER }}
+          LIGHTSAIL_SSH_KEY: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+        run: |
+          if [ -z "$LIGHTSAIL_HOST" ] || [ -z "$LIGHTSAIL_USER" ] || [ -z "$LIGHTSAIL_SSH_KEY" ]; then
+            echo "::error::Add repository secrets: LIGHTSAIL_HOST, LIGHTSAIL_USER, LIGHTSAIL_SSH_KEY"
+            echo "See docs/LIGHTSAIL_SINGLE_SERVER.md → GitHub auto-deploy"
+            exit 1
+          fi
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+
+      - name: Build JAR
+        working-directory: backend
+        run: mvn -q -DskipTests package
+
+      - name: Prepare remote directories
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            sudo mkdir -p /opt/tankermanager/api /opt/tankermanager/deploy/nginx
+            sudo chown -R ubuntu:ubuntu /opt/tankermanager
+
+      - name: Upload JAR
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: "backend/target/tanker-manager-1.0.0.jar"
+          target: "/opt/tankermanager/api"
+          strip_components: 2
+
+      - name: Upload deploy scripts
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: "deploy/github-deploy-restart.sh,deploy/tankermanager-api.service,deploy/nginx/tankermanager-host.conf"
+          target: "/opt/tankermanager/deploy"
+          strip_components: 1
+
+      - name: Restart API on server
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            chmod +x /opt/tankermanager/deploy/github-deploy-restart.sh
+            bash /opt/tankermanager/deploy/github-deploy-restart.sh
+
+  build-android:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Require LIGHTSAIL_HOST for APK API URL
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+        run: |
+          if [ -z "$LIGHTSAIL_HOST" ]; then
+            echo "::error::Set LIGHTSAIL_HOST secret so the APK points at your server"
+            exit 1
+          fi
+
+      - name: Resolve API base URL for APK
+        id: api
+        env:
+          LIGHTSAIL_HOST: ${{ secrets.LIGHTSAIL_HOST }}
+          API_PUBLIC_BASE_URL: ${{ secrets.API_PUBLIC_BASE_URL }}
+        run: |
+          if [ -n "$API_PUBLIC_BASE_URL" ]; then
+            URL="$API_PUBLIC_BASE_URL"
+          else
+            URL="http://${LIGHTSAIL_HOST}/"
+          fi
+          case "$URL" in */) ;; *) URL="${URL}/" ;; esac
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "APK BASE_URL=$URL"
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Assemble debug APK
+        working-directory: android
+        env:
+          API_BASE_URL: ${{ steps.api.outputs.url }}
+        run: ./gradlew assembleDebug --no-daemon -PAPI_BASE_URL="$API_BASE_URL"
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tankerflow-debug-apk
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
+

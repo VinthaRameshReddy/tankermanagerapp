@@ -29,7 +29,8 @@ public class ProdDataSourceConfig {
     @Bean
     @Primary
     public DataSource dataSource(Environment env) {
-        DbParts parts = resolve(env);
+        String sslMode = firstNonBlank(env.getProperty("DATABASE_SSL_MODE"), "require");
+        DbParts parts = resolve(env, sslMode);
 
         HikariDataSource ds = new HikariDataSource();
         ds.setJdbcUrl(parts.jdbcUrl);
@@ -39,24 +40,28 @@ public class ProdDataSourceConfig {
         ds.setMaximumPoolSize(5);
         ds.setConnectionTimeout(60000);
         ds.setInitializationFailTimeout(30000);
-        String sslMode = firstNonBlank(env.getProperty("DATABASE_SSL_MODE"), "require");
-        ds.addDataSourceProperty("ssl", "true");
-        ds.addDataSourceProperty("sslmode", sslMode);
-        if ("require".equals(sslMode) || "verify-full".equals(sslMode)) {
-            ds.addDataSourceProperty("sslfactory", "org.postgresql.ssl.NonValidatingFactory");
+        if ("disable".equalsIgnoreCase(sslMode)) {
+            ds.addDataSourceProperty("ssl", "false");
+            ds.addDataSourceProperty("sslmode", "disable");
+        } else {
+            ds.addDataSourceProperty("ssl", "true");
+            ds.addDataSourceProperty("sslmode", sslMode);
+            if ("require".equals(sslMode) || "verify-full".equals(sslMode)) {
+                ds.addDataSourceProperty("sslfactory", "org.postgresql.ssl.NonValidatingFactory");
+            }
         }
 
         log.info("Prod datasource jdbcUrl={} user={}", parts.jdbcUrl, parts.username);
         return ds;
     }
 
-    private static DbParts resolve(Environment env) {
+    private static DbParts resolve(Environment env, String sslMode) {
         String rawUrl = firstNonBlank(env.getProperty("DATABASE_URL"), env.getProperty("spring.datasource.url"));
         String user = firstNonBlank(env.getProperty("DATABASE_USER"), env.getProperty("DB_USERNAME"));
         String pass = firstNonBlank(env.getProperty("DATABASE_PASSWORD"), env.getProperty("DB_PASSWORD"));
 
         if (!isBlank(rawUrl)) {
-            DbParts fromUrl = parseDatabaseUrl(rawUrl, env);
+            DbParts fromUrl = parseDatabaseUrl(rawUrl, env, sslMode);
             if (isBlank(fromUrl.username) && !isBlank(user)) {
                 fromUrl.username = user;
             }
@@ -80,14 +85,14 @@ public class ProdDataSourceConfig {
                             + "(must include ...-postgres.render.com host).");
         }
         host = toExternalHost(host, env);
-        String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + name);
+        String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + name, sslMode);
         return new DbParts(jdbc, user, pass);
     }
 
-    static DbParts parseDatabaseUrl(String raw, Environment env) {
+    static DbParts parseDatabaseUrl(String raw, Environment env, String sslMode) {
         String value = raw.trim();
         if (value.startsWith("jdbc:postgresql://") && !value.contains("@")) {
-            return new DbParts(withSsl(value), null, null);
+            return new DbParts(withSsl(value, sslMode), null, null);
         }
 
         String normalized = value;
@@ -122,7 +127,7 @@ public class ProdDataSourceConfig {
                 }
             }
 
-            String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + db);
+            String jdbc = withSsl("jdbc:postgresql://" + host + ":" + port + "/" + db, sslMode);
             return new DbParts(jdbc, username, password);
         } catch (URISyntaxException e) {
             throw new IllegalStateException("Invalid DATABASE_URL: " + e.getMessage(), e);
@@ -134,7 +139,7 @@ public class ProdDataSourceConfig {
      * Expand to external hostname so TLS public connections work reliably.
      */
     static String toExternalHost(String host, Environment env) {
-        if (host == null || host.contains(".")) {
+        if (host == null || host.contains(".") || isLocalHost(host)) {
             return host;
         }
         String override = env != null ? firstNonBlank(env.getProperty("DATABASE_EXTERNAL_HOST")) : null;
@@ -149,15 +154,23 @@ public class ProdDataSourceConfig {
         return expanded;
     }
 
-    static String withSsl(String jdbcUrl) {
-        String url = jdbcUrl;
-        if (!url.contains("sslmode=")) {
-            url = url + (url.contains("?") ? "&" : "?") + "sslmode=require";
+    static String withSsl(String jdbcUrl, String sslMode) {
+        String mode = firstNonBlank(sslMode, "require");
+        String base = jdbcUrl.split("\\?")[0];
+        if ("disable".equalsIgnoreCase(mode)) {
+            return base + "?sslmode=disable";
         }
-        if (!url.contains("sslfactory=")) {
+        String url = base + "?sslmode=" + mode;
+        if ("require".equals(mode) || "verify-full".equals(mode)) {
             url = url + "&sslfactory=org.postgresql.ssl.NonValidatingFactory";
         }
         return url;
+    }
+
+    private static boolean isLocalHost(String host) {
+        return "localhost".equalsIgnoreCase(host)
+                || "127.0.0.1".equals(host)
+                || "::1".equals(host);
     }
 
     private static String urlDecode(String value) {

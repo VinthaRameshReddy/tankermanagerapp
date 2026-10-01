@@ -16,6 +16,12 @@ if [ ! -f "$API_JAR" ]; then
   exit 1
 fi
 
+api_healthy() {
+  curl -sf http://127.0.0.1:8080/actuator/health >/dev/null && return 0
+  curl -sf http://127.0.0.1:8080/v3/api-docs >/dev/null && return 0
+  return 1
+}
+
 sudo cp "$DEPLOY_DIR/tankermanager-api.service" /etc/systemd/system/tankermanager-api.service
 sudo systemctl daemon-reload
 sudo systemctl enable tankermanager-api
@@ -30,10 +36,10 @@ fi
 
 sudo systemctl restart tankermanager-api
 
-echo "Waiting for Spring Boot (1 GB RAM: often 60–120s after restart)..."
+echo "Waiting for Spring Boot (1 GB RAM: often 30–90s after restart)..."
 sleep 10
-for i in $(seq 1 90); do
-  if curl -sf http://127.0.0.1:8080/actuator/health >/dev/null; then
+for i in $(seq 1 60); do
+  if api_healthy; then
     echo "Deploy OK — API healthy on :8080 (after ${i} checks)"
     exit 0
   fi

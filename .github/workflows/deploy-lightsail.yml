@@ -9,6 +9,10 @@ on:
     branches: [main]
   workflow_dispatch:
 
+concurrency:
+  group: lightsail-deploy-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   deploy-api:
     runs-on: ubuntu-latest
@@ -74,6 +78,7 @@ jobs:
           host: ${{ secrets.LIGHTSAIL_HOST }}
           username: ${{ secrets.LIGHTSAIL_USER }}
           key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          command_timeout: 15m
           script: |
             chmod +x /opt/tankermanager/deploy/github-deploy-restart.sh
             bash /opt/tankermanager/deploy/github-deploy-restart.sh

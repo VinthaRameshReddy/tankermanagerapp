@@ -36,6 +36,16 @@ public class UserAccount {
     @Column(nullable = false)
     private String passwordHash;
 
+    /**
+     * BCrypt hash of SHA-256(MPIN). Never store raw MPIN.
+     * Null until the user sets an MPIN.
+     */
+    @Column(length = 100)
+    private String mpinHash;
+
+    @Builder.Default
+    private boolean mpinEnabled = false;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 30)
     private Role role;

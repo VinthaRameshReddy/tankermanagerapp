@@ -49,6 +49,9 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/api/auth/login",
+                                "/api/auth/mpin/login",
+                                "/api/auth/biometric/challenge",
+                                "/api/auth/biometric/verify",
                                 "/api/public/**",
                                 "/swagger-ui/**",
                                 "/swagger-ui.html",

@@ -314,6 +314,10 @@ private fun TripsTab(
     }
     LaunchedEffect(period, selectedTankerIds) { reload() }
 
+    val liveCount = trips.count { it.status !in listOf("COMPLETED", "CANCELLED", "QUEUED") }
+    val queuedCount = trips.count { it.status == "QUEUED" }
+    val doneCount = trips.count { it.status == "COMPLETED" }
+
     val filtered = when (filter) {
         "ACTIVE" -> trips.filter { it.status !in listOf("COMPLETED", "CANCELLED") }
         "QUEUED" -> trips.filter { it.status == "QUEUED" }
@@ -321,80 +325,148 @@ private fun TripsTab(
         else -> trips
     }
 
-    ScreenScaffold(title = "Trips", subtitle = "Filter by day / week / month · queue & swap") {
-        ErrorBanner(error)
-        Text("Time range", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("ALL" to "All", "DAY" to "Today", "WEEK" to "This week", "MONTH" to "This month")
-                .forEach { (key, label) ->
-                    FilterChip(selected = period == key, onClick = { period = key }, label = { Text(label) })
-                }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text("Tankers", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterChip(
-                selected = selectedTankerIds.isEmpty(),
-                onClick = { selectedTankerIds = emptySet() },
-                label = { Text("All tankers") }
-            )
-            tankers.forEach { t ->
-                FilterChip(
-                    selected = t.id in selectedTankerIds,
-                    onClick = {
-                        selectedTankerIds = if (t.id in selectedTankerIds) {
-                            selectedTankerIds - t.id
-                        } else {
-                            selectedTankerIds + t.id
-                        }
-                    },
-                    label = { Text(t.vehicleNumber) }
-                )
-            }
-        }
-        Spacer(modifier = Modifier.height(8.dp))
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState()),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            listOf("ALL" to "All", "ACTIVE" to "Live", "QUEUED" to "Queued", "DONE" to "Done").forEach { (key, label) ->
-                FilterChip(
-                    selected = filter == key,
-                    onClick = { filter = key },
-                    label = { Text(label) }
-                )
-            }
-        }
-        if (swapFromId != null) {
-            Text(
-                "Tap another queued/assigned trip on the same tanker to swap order.",
-                color = Coral,
-                style = MaterialTheme.typography.bodySmall
-            )
-            TextButton(onClick = { swapFromId = null }) { Text("Cancel swap") }
-        }
-        Spacer(modifier = Modifier.height(12.dp))
-        if (filtered.isEmpty()) {
-            EmptyState("No trips for this filter — tap + Trip to book")
-        } else {
-            LazyColumn(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                contentPadding = PaddingValues(bottom = 88.dp)
+    val periodLabel = when (period) {
+        "DAY" -> "Today"
+        "WEEK" -> "This week"
+        "MONTH" -> "This month"
+        else -> "All time"
+    }
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 96.dp)
+    ) {
+        item {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(bottomStart = 32.dp, bottomEnd = 32.dp))
+                    .background(Brush.verticalGradient(listOf(LagoonDeep, Lagoon)))
+                    .padding(22.dp)
             ) {
-                itemsIndexed(filtered, key = { _, t -> t.id }) { _, trip ->
+                Column {
+                    Text(
+                        "Trips",
+                        color = Color.White,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.headlineMedium
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    Text(
+                        "$periodLabel · tap a card for details",
+                        color = Color.White.copy(alpha = 0.9f),
+                        style = MaterialTheme.typography.bodyLarge
+                    )
+                    if (swapFromId != null) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Text(
+                            "Swap mode — tap another trip on the same tanker",
+                            color = Sun,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                        TextButton(onClick = { swapFromId = null }) {
+                            Text("Cancel swap", color = Color.White)
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Column(
+                modifier = Modifier.padding(16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                ErrorBanner(error)
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatChip("Live", "$liveCount", Lagoon, Icons.Rounded.Route, Modifier.weight(1f))
+                    StatChip("Queued", "$queuedCount", Sun, Icons.Rounded.WaterDrop, Modifier.weight(1f))
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                    StatChip("Done", "$doneCount", Coral, Icons.Rounded.LocalShipping, Modifier.weight(1f))
+                    StatChip("Total", "${trips.size}", LagoonDeep, Icons.Rounded.Person, Modifier.weight(1f))
+                }
+
+                GlassCard {
+                    Text("Time range", fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf("ALL" to "All", "DAY" to "Today", "WEEK" to "Week", "MONTH" to "Month")
+                            .forEach { (key, label) ->
+                                FilterChip(
+                                    selected = period == key,
+                                    onClick = { period = key },
+                                    label = { Text(label) }
+                                )
+                            }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Tankers", fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        FilterChip(
+                            selected = selectedTankerIds.isEmpty(),
+                            onClick = { selectedTankerIds = emptySet() },
+                            label = { Text("All") }
+                        )
+                        tankers.forEach { t ->
+                            FilterChip(
+                                selected = t.id in selectedTankerIds,
+                                onClick = {
+                                    selectedTankerIds = if (t.id in selectedTankerIds) {
+                                        selectedTankerIds - t.id
+                                    } else {
+                                        selectedTankerIds + t.id
+                                    }
+                                },
+                                label = { Text(t.vehicleNumber) }
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.height(12.dp))
+                    Text("Status", fontWeight = FontWeight.SemiBold)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        listOf(
+                            "ALL" to "All",
+                            "ACTIVE" to "Live",
+                            "QUEUED" to "Queued",
+                            "DONE" to "Done"
+                        ).forEach { (key, label) ->
+                            FilterChip(
+                                selected = filter == key,
+                                onClick = { filter = key },
+                                label = { Text(label) }
+                            )
+                        }
+                    }
+                }
+
+                Text("Deliveries", style = MaterialTheme.typography.titleLarge)
+                if (filtered.isEmpty()) {
+                    EmptyState("No trips for this filter — tap + Trip to book")
+                }
+            }
+        }
+
+        if (filtered.isNotEmpty()) {
+            itemsIndexed(filtered, key = { _, t -> t.id }) { _, trip ->
+                Column(modifier = Modifier.padding(horizontal = 16.dp)) {
                     AnimatedVisibility(visible = true, enter = fadeIn() + slideInVertically { it / 4 }) {
                         TripCard(
                             trip = trip,
@@ -425,6 +497,7 @@ private fun TripsTab(
                             }
                         )
                     }
+                    Spacer(modifier = Modifier.height(12.dp))
                 }
             }
         }
@@ -441,49 +514,64 @@ fun TripCard(
 ) {
     GlassCard(onClick = onOpen) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            Text(trip.tripCode ?: "Trip", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(trip.customerName ?: "Customer", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
+                Text(trip.tripCode ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
             StatusPill(trip.status)
         }
-        Spacer(modifier = Modifier.height(8.dp))
-        Text(trip.customerName ?: "Customer", style = MaterialTheme.typography.titleMedium)
-        Text(trip.customerPhone ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Spacer(modifier = Modifier.height(8.dp))
+        Spacer(modifier = Modifier.height(10.dp))
         Text("${trip.tankerNumber ?: "—"}  •  ${trip.driverName ?: "—"}")
         if (trip.status == "QUEUED" && trip.queuePosition != null) {
             Text(
-                "Queue #${trip.queuePosition} — starts after current trip",
+                "Queue #${trip.queuePosition} — next after current trip",
                 color = Sun,
                 fontWeight = FontWeight.SemiBold
             )
         }
-        Text(trip.dropAddress ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-        if ((trip.tripAmount ?: 0.0) > 0 || (trip.amountDue ?: 0.0) > 0) {
-            Text(
-                "₹${"%.0f".format(trip.tripAmount ?: 0.0)} trip" +
-                    (trip.amountDue?.takeIf { it > 0 }?.let { " · due ₹${"%.0f".format(it)}" } ?: ""),
-                fontWeight = FontWeight.Medium
-            )
-        }
-        if (trip.distanceKm != null || trip.etaMinutes != null) {
-            Text(
-                listOfNotNull(
-                    trip.distanceKm?.let { "~$it km to drop" },
-                    trip.etaMinutes?.let { "ETA ${it}m" },
-                    trip.boreName?.let { "via $it" }
-                ).joinToString(" • "),
-                color = Lagoon,
-                fontWeight = FontWeight.SemiBold
-            )
+        Text(
+            trip.dropAddress ?: "",
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column {
+                if ((trip.tripAmount ?: 0.0) > 0 || (trip.amountDue ?: 0.0) > 0) {
+                    Text(
+                        "₹${"%.0f".format(trip.tripAmount ?: 0.0)}" +
+                            (trip.amountDue?.takeIf { it > 0 }?.let { " · due ₹${"%.0f".format(it)}" } ?: ""),
+                        color = LagoonDeep,
+                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium
+                    )
+                }
+                if (trip.distanceKm != null || trip.etaMinutes != null) {
+                    Text(
+                        listOfNotNull(
+                            trip.distanceKm?.let { "~$it km" },
+                            trip.etaMinutes?.let { "ETA ${it}m" }
+                        ).joinToString(" • "),
+                        color = Lagoon,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+            }
         }
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             if (trip.trackingEnabled == true && !trip.trackingToken.isNullOrBlank()) {
                 TextButton(onClick = onTrack, contentPadding = PaddingValues(0.dp)) {
-                    Text("Open live tracking")
+                    Text("Live track")
                 }
             }
             if (onSwap != null && (trip.status == "QUEUED" || trip.status == "ASSIGNED")) {
                 TextButton(onClick = onSwap, contentPadding = PaddingValues(0.dp)) {
-                    Text(if (swapSelected) "Selected — tap other trip" else "Swap order")
+                    Text(if (swapSelected) "Selected…" else "Swap order")
                 }
             }
         }

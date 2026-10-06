@@ -20,6 +20,13 @@ android {
                 ?: "http://13.203.91.129/"
             ).let { url -> if (url.endsWith("/")) url else "$url/" }
         buildConfigField("String", "BASE_URL", "\"$apiBaseUrl\"")
+        // Must match backend app.secure.payload-key / AUTH_PAYLOAD_KEY
+        val payloadKey = (
+            project.findProperty("AUTH_PAYLOAD_KEY") as String?
+                ?: System.getenv("AUTH_PAYLOAD_KEY")
+                ?: "Tank3rFlowLocalPayloadKeyChangeMe!!"
+            )
+        buildConfigField("String", "PAYLOAD_KEY", "\"$payloadKey\"")
     }
 
     buildTypes {
@@ -80,6 +87,8 @@ dependencies {
 
     implementation("androidx.datastore:datastore-preferences:1.1.1")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
 
     debugImplementation("androidx.compose.ui:ui-tooling")
 }

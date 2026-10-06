@@ -51,6 +51,74 @@ public final class AuthDtos {
         private Role role;
         private Long operatorId;
         private String operatorName;
+        private boolean mpinEnabled;
+        private boolean biometricEnabled;
+        /** Encrypted JSON of the same fields (AES-GCM Base64) for secure clients. */
+        private String securePayload;
+    }
+
+    @Data
+    public static class EncryptedPayloadRequest {
+        /** Base64 AES-256-GCM: iv(12) || ciphertext+tag */
+        @NotBlank
+        private String payload;
+    }
+
+    @Data
+    public static class SetMpinPlain {
+        /** Raw 4–6 digit MPIN OR client SHA-256 hex of MPIN. */
+        @NotBlank
+        private String mpin;
+        private String currentMpin;
+    }
+
+    @Data
+    public static class MpinLoginPlain {
+        @NotBlank
+        private String phone;
+        /** Raw MPIN or SHA-256 hex of MPIN. */
+        @NotBlank
+        private String mpin;
+    }
+
+    @Data
+    public static class RegisterBiometricPlain {
+        @NotBlank
+        private String deviceId;
+        /** Base64 X.509 EC public key (P-256). */
+        @NotBlank
+        private String publicKeyBase64;
+        private String deviceLabel;
+    }
+
+    @Data
+    public static class BiometricChallengeRequest {
+        @NotBlank
+        private String phone;
+        @NotBlank
+        private String deviceId;
+    }
+
+    @Data
+    @Builder
+    public static class BiometricChallengeResponse {
+        private String challengeId;
+        private String nonce;
+        private Instant expiresAt;
+        private String securePayload;
+    }
+
+    @Data
+    public static class BiometricVerifyPlain {
+        @NotBlank
+        private String phone;
+        @NotBlank
+        private String deviceId;
+        @NotBlank
+        private String challengeId;
+        /** Base64 DER ECDSA signature over SHA-256(challenge payload). */
+        @NotBlank
+        private String signatureBase64;
     }
 
     @Data

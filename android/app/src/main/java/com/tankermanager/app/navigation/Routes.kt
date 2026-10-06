@@ -3,6 +3,8 @@ package com.tankermanager.app.navigation
 sealed class Routes(val route: String) {
     data object Splash : Routes("splash")
     data object Auth : Routes("auth")
+    data object Unlock : Routes("unlock")
+    data object SecuritySetup : Routes("security-setup")
     data object Admin : Routes("admin")
     data object Manager : Routes("manager")
     data object Driver : Routes("driver")

@@ -1,7 +1,6 @@
 package com.tankermanager.app
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.animation.AnimatedContentTransitionScope
@@ -13,6 +12,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Modifier
+import androidx.fragment.app.FragmentActivity
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
@@ -23,14 +23,17 @@ import com.tankermanager.app.navigation.Routes
 import com.tankermanager.app.ui.SplashScreen
 import com.tankermanager.app.ui.admin.SuperAdminScreen
 import com.tankermanager.app.ui.auth.AuthScreen
+import com.tankermanager.app.ui.auth.SecuritySetupScreen
+import com.tankermanager.app.ui.auth.UnlockScreen
 import com.tankermanager.app.ui.driver.DriverHomeScreen
 import com.tankermanager.app.ui.manager.ManagerShell
 import com.tankermanager.app.ui.manager.TripDetailScreen
 import com.tankermanager.app.ui.theme.TankerTheme
 import com.tankermanager.app.ui.track.TrackScreen
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -59,7 +62,7 @@ private fun TankerNav(deepToken: String?) {
             else -> Routes.Manager.route
         }
         nav.navigate(dest) {
-            popUpTo(Routes.Auth.route) { inclusive = true }
+            popUpTo(0) { inclusive = true }
             launchSingleTop = true
         }
     }
@@ -102,8 +105,42 @@ private fun TankerNav(deepToken: String?) {
         composable(Routes.Auth.route) {
             AuthScreen(
                 repo = repo,
-                onLoggedIn = { goHome(it) },
+                onLoggedIn = { role, needsSecuritySetup ->
+                    if (needsSecuritySetup) {
+                        nav.navigate(Routes.SecuritySetup.route) {
+                            popUpTo(Routes.Auth.route) { inclusive = true }
+                        }
+                    } else {
+                        goHome(role)
+                    }
+                },
                 onTrackTap = { nav.navigate(Routes.Track.create()) }
+            )
+        }
+        composable(Routes.Unlock.route) {
+            UnlockScreen(
+                repo = repo,
+                onUnlocked = { goHome(it) },
+                onUsePassword = {
+                    scope.launch {
+                        repo.session().clear()
+                        ApiClient.reset()
+                        nav.navigate(Routes.Auth.route) {
+                            popUpTo(0) { inclusive = true }
+                        }
+                    }
+                }
+            )
+        }
+        composable(Routes.SecuritySetup.route) {
+            SecuritySetupScreen(
+                repo = repo,
+                onDone = {
+                    scope.launch {
+                        val role = repo.session().role.first()
+                        goHome(role)
+                    }
+                }
             )
         }
         composable(Routes.Admin.route) {

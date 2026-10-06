@@ -7,10 +7,30 @@ data class AuthResponse(
     val phone: String?,
     val role: String?,
     val operatorId: Long?,
-    val operatorName: String?
+    val operatorName: String?,
+    val mpinEnabled: Boolean? = false,
+    val biometricEnabled: Boolean? = false,
+    val securePayload: String? = null
 )
 
 data class LoginRequest(val phone: String, val password: String)
+
+data class EncryptedPayloadRequest(val payload: String)
+
+data class BiometricChallengeRequest(val phone: String, val deviceId: String)
+
+data class BiometricChallengeResponse(
+    val challengeId: String?,
+    val nonce: String?,
+    val expiresAt: String?,
+    val securePayload: String? = null
+)
+
+data class BiometricRegisterResponse(
+    val registered: Boolean? = null,
+    val deviceId: String? = null,
+    val biometricEnabled: Boolean? = null
+)
 
 data class CreateStaffRequest(
     val fullName: String,

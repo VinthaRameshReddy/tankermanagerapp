@@ -37,11 +37,17 @@ fun SplashScreen(
 
     LaunchedEffect(Unit) {
         ready = true
-        delay(2400)
+        delay(1800)
         val token = repo.session().token.first()
         val role = repo.session().role.first()
+        val mpinOn = repo.session().mpinEnabled.first()
         when {
             token.isNullOrBlank() -> onDone("auth")
+            mpinOn -> {
+                // Force backend re-validation via MPIN / biometric unlock
+                repo.session().setUnlocked(false)
+                onDone("unlock")
+            }
             role == "SUPER_ADMIN" -> onDone("admin")
             role == "DRIVER" -> onDone("driver")
             else -> onDone("manager")

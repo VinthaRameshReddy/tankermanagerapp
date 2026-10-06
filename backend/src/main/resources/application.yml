@@ -22,6 +22,9 @@ app:
   jwt:
     secret: ${JWT_SECRET:Tank3rM4nagerSecr3tKeyMustBeAtLeast256BitsLongForHS256Algorithm!!}
     expiration-ms: ${JWT_EXPIRATION_MS:86400000}
+  secure:
+    # Shared AES key material for auth payload encryption (must match Android BuildConfig.PAYLOAD_KEY)
+    payload-key: ${AUTH_PAYLOAD_KEY:Tank3rFlowLocalPayloadKeyChangeMe!!}
   public-base-url: ${APP_PUBLIC_BASE_URL:}
   sms:
     # Accepts same names as openplot: FAST2SMS_* (or SMS_*)

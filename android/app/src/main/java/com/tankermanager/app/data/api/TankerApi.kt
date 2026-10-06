@@ -14,6 +14,24 @@ interface TankerApi {
     @POST("api/auth/staff")
     suspend fun createStaff(@Body body: CreateStaffRequest): AuthResponse
 
+    @POST("api/auth/mpin/set")
+    suspend fun setMpin(@Body body: EncryptedPayloadRequest): AuthResponse
+
+    @POST("api/auth/mpin/login")
+    suspend fun mpinLogin(@Body body: EncryptedPayloadRequest): AuthResponse
+
+    @POST("api/auth/biometric/register")
+    suspend fun registerBiometric(@Body body: EncryptedPayloadRequest): BiometricRegisterResponse
+
+    @POST("api/auth/biometric/challenge")
+    suspend fun biometricChallenge(@Body body: BiometricChallengeRequest): BiometricChallengeResponse
+
+    @POST("api/auth/biometric/verify")
+    suspend fun biometricVerify(@Body body: EncryptedPayloadRequest): AuthResponse
+
+    @DELETE("api/auth/biometric/{deviceId}")
+    suspend fun revokeBiometric(@Path("deviceId") deviceId: String): Map<String, Any>
+
     @GET("api/admin/operators")
     suspend fun listOperators(): List<OperatorResponse>
 

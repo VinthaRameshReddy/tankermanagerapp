@@ -8,6 +8,7 @@ import com.tankermanager.enums.Role;
 import com.tankermanager.exception.BadRequestException;
 import com.tankermanager.exception.ForbiddenException;
 import com.tankermanager.exception.ResourceNotFoundException;
+import com.tankermanager.repository.BiometricDeviceRepository;
 import com.tankermanager.repository.DriverRepository;
 import com.tankermanager.repository.OperatorRepository;
 import com.tankermanager.repository.UserAccountRepository;
@@ -28,6 +29,7 @@ public class AuthService {
     private final UserAccountRepository userAccountRepository;
     private final OperatorRepository operatorRepository;
     private final DriverRepository driverRepository;
+    private final BiometricDeviceRepository biometricDeviceRepository;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final AuthenticationManager authenticationManager;
@@ -112,6 +114,8 @@ public class AuthService {
                 .role(user.getRole())
                 .operatorId(user.getOperator() != null ? user.getOperator().getId() : null)
                 .operatorName(user.getOperator() != null ? user.getOperator().getName() : null)
+                .mpinEnabled(user.isMpinEnabled())
+                .biometricEnabled(biometricDeviceRepository.existsByUserIdAndActiveTrue(user.getId()))
                 .build();
     }
 }

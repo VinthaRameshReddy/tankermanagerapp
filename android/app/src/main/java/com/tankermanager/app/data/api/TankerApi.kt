@@ -35,11 +35,23 @@ interface TankerApi {
     @POST("api/manager/tankers")
     suspend fun addTanker(@Body body: TankerRequest): TankerResponse
 
+    @PATCH("api/manager/tankers/{id}")
+    suspend fun updateTanker(@Path("id") id: Long, @Body body: TankerRequest): TankerResponse
+
+    @DELETE("api/manager/tankers/{id}")
+    suspend fun deleteTanker(@Path("id") id: Long)
+
     @GET("api/manager/drivers")
-    suspend fun drivers(): List<DriverResponse>
+    suspend fun drivers(@Query("includeResigned") includeResigned: Boolean = false): List<DriverResponse>
 
     @GET("api/manager/drivers/available")
     suspend fun availableDrivers(): List<DriverResponse>
+
+    @PATCH("api/manager/drivers/{id}/status")
+    suspend fun setDriverStatus(
+        @Path("id") id: Long,
+        @Body body: DriverStatusRequest
+    ): DriverResponse
 
     @GET("api/manager/customers")
     suspend fun customers(): List<CustomerResponse>
@@ -75,14 +87,32 @@ interface TankerApi {
     @POST("api/manager/bores")
     suspend fun addBore(@Body body: BoreRequest): BoreResponse
 
+    @PATCH("api/manager/bores/{id}")
+    suspend fun updateBore(@Path("id") id: Long, @Body body: BoreRequest): BoreResponse
+
+    @DELETE("api/manager/bores/{id}")
+    suspend fun deleteBore(@Path("id") id: Long)
+
     @GET("api/manager/trips")
-    suspend fun trips(): List<TripResponse>
+    suspend fun trips(
+        @Query("period") period: String? = null,
+        @Query("tankerIds") tankerIds: String? = null
+    ): List<TripResponse>
 
     @GET("api/manager/trips/{id}")
     suspend fun trip(@Path("id") id: Long): TripResponse
 
     @POST("api/manager/trips")
     suspend fun bookTrip(@Body body: BookTripRequest): TripResponse
+
+    @POST("api/manager/trips/{id}/swap")
+    suspend fun swapTrips(
+        @Path("id") id: Long,
+        @Body body: SwapTripRequest
+    ): List<TripResponse>
+
+    @POST("api/manager/trips/distance-preview")
+    suspend fun distancePreview(@Body body: DistancePreviewRequest): DistancePreviewResponse
 
     @PATCH("api/manager/trips/{id}/status")
     suspend fun managerUpdateStatus(

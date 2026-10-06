@@ -137,17 +137,39 @@ data class BoreResponse(
     val id: Long,
     val name: String?,
     val address: String?,
+    val mapsLink: String? = null,
     val latitude: Double?,
     val longitude: Double?,
-    val primaryBore: Boolean?
+    val primaryBore: Boolean?,
+    val active: Boolean? = true
 )
 
 data class BoreRequest(
     val name: String,
-    val address: String,
-    val latitude: Double,
-    val longitude: Double,
+    val address: String? = null,
+    val mapsLink: String? = null,
+    val latitude: Double? = null,
+    val longitude: Double? = null,
     val primaryBore: Boolean = true
+)
+
+data class DriverStatusRequest(val active: Boolean)
+
+data class SwapTripRequest(val otherTripId: Long)
+
+data class DistancePreviewRequest(
+    val boreId: Long? = null,
+    val customerLocationId: Long? = null,
+    val dropLat: Double? = null,
+    val dropLng: Double? = null,
+    val mapsLink: String? = null
+)
+
+data class DistancePreviewResponse(
+    val boreId: Long?,
+    val boreName: String?,
+    val distanceKm: Double?,
+    val etaMinutes: Int?
 )
 
 data class BookTripRequest(
@@ -177,14 +199,17 @@ data class TripResponse(
     val id: Long,
     val tripCode: String?,
     val status: String?,
+    val queuePosition: Int? = null,
     val customerName: String?,
     val customerPhone: String?,
     val customerId: Long? = null,
     val customerLocationId: Long? = null,
+    val tankerId: Long? = null,
     val tankerNumber: String?,
     val driverId: Long?,
     val driverName: String?,
     val driverPhone: String?,
+    val boreId: Long? = null,
     val boreName: String?,
     val dropAddress: String?,
     val dropLat: Double?,
@@ -202,6 +227,7 @@ data class TripResponse(
     val assignedAt: String?,
     val startedAt: String?,
     val completedAt: String?,
+    val createdAt: String? = null,
     val notes: String?,
     val history: List<StatusHistoryItem>? = null
 )

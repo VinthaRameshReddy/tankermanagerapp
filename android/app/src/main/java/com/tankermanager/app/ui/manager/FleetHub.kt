@@ -33,11 +33,13 @@ import androidx.compose.ui.unit.dp
 import com.tankermanager.app.util.lastKnownLocation
 import com.tankermanager.app.util.MapsLinkResolver
 import com.tankermanager.app.data.model.BoreRequest
+import com.tankermanager.app.data.model.BoreResponse
 import com.tankermanager.app.data.model.CreateStaffRequest
 import com.tankermanager.app.data.model.CustomerLocationRequest
 import com.tankermanager.app.data.model.CustomerRequest
 import com.tankermanager.app.data.model.CustomerResponse
 import com.tankermanager.app.data.model.DriverResponse
+import com.tankermanager.app.data.model.DriverStatusRequest
 import com.tankermanager.app.data.model.StaffResponse
 import com.tankermanager.app.data.model.TankerRequest
 import com.tankermanager.app.data.model.TankerResponse
@@ -62,11 +64,16 @@ fun FleetHub(repo: TankerRepository) {
     val isOwner = role == "OWNER"
     var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
     var drivers by remember { mutableStateOf<List<DriverResponse>>(emptyList()) }
+    var bores by remember { mutableStateOf<List<BoreResponse>>(emptyList()) }
     var managers by remember { mutableStateOf<List<StaffResponse>>(emptyList()) }
     var customers by remember { mutableStateOf<List<CustomerResponse>>(emptyList()) }
     var section by remember { mutableIntStateOf(0) }
     var vehicle by remember { mutableStateOf("") }
     var capacity by remember { mutableStateOf("5000") }
+    var editingTankerId by remember { mutableStateOf<Long?>(null) }
+    var editingBoreId by remember { mutableStateOf<Long?>(null) }
+    var boreMapsLink by remember { mutableStateOf("") }
+    var showResignedDrivers by remember { mutableStateOf(false) }
     var staffName by remember { mutableStateOf("") }
     var staffPhone by remember { mutableStateOf("") }
     var staffPass by remember { mutableStateOf("Pass@123") }
@@ -136,7 +143,9 @@ fun FleetHub(repo: TankerRepository) {
     fun refresh() {
         scope.launch {
             repo.safe { tankers() }.onSuccess { tankers = it }.onFailure { msg = it.message }
-            repo.safe { drivers() }.onSuccess { drivers = it }.onFailure { msg = it.message }
+            repo.safe { drivers(includeResigned = showResignedDrivers || isOwner) }
+                .onSuccess { drivers = it }.onFailure { msg = it.message }
+            repo.safe { bores() }.onSuccess { bores = it }.onFailure { msg = it.message }
             repo.safe { managers() }.onSuccess { managers = it }.onFailure { msg = it.message }
             repo.safe { customers() }.onSuccess { customers = it }.onFailure { msg = it.message }
         }
@@ -170,23 +179,53 @@ fun FleetHub(repo: TankerRepository) {
             0 -> {
                 SoftField(vehicle, { vehicle = it.uppercase() }, "Vehicle number")
                 SoftField(capacity, { capacity = it }, "Capacity (litres)")
-                PrimaryButton("Add tanker", onClick = {
-                    scope.launch {
-                        repo.safe { addTanker(TankerRequest(vehicle, capacityLitres = capacity.toIntOrNull())) }
-                            .onSuccess { vehicle = ""; refresh(); msg = "Tanker added" }
-                            .onFailure { msg = it.message }
+                PrimaryButton(
+                    if (editingTankerId == null) "Add tanker" else "Save tanker changes",
+                    onClick = {
+                        scope.launch {
+                            val body = TankerRequest(vehicle, capacityLitres = capacity.toIntOrNull())
+                            val editId = editingTankerId
+                            val result = if (editId == null) {
+                                repo.safe { addTanker(body) }
+                            } else {
+                                repo.safe { updateTanker(editId, body) }
+                            }
+                            result.onSuccess {
+                                vehicle = ""; capacity = "5000"; editingTankerId = null
+                                refresh(); msg = if (editId == null) "Tanker added" else "Tanker updated"
+                            }.onFailure { msg = it.message }
+                        }
                     }
-                })
+                )
+                if (editingTankerId != null) {
+                    TextButton(onClick = {
+                        editingTankerId = null; vehicle = ""; capacity = "5000"
+                    }) { Text("Cancel edit") }
+                }
                 Spacer(modifier = Modifier.height(12.dp))
                 LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(tankers, key = { it.id }) { t ->
                         GlassCard {
                             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                Column {
+                                Column(modifier = Modifier.weight(1f)) {
                                     Text(t.vehicleNumber, fontWeight = FontWeight.Bold)
                                     Text("${t.capacityLitres ?: "—"} L", color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 StatusPill(t.status)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = {
+                                    editingTankerId = t.id
+                                    vehicle = t.vehicleNumber
+                                    capacity = (t.capacityLitres ?: 5000).toString()
+                                }) { Text("Edit") }
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        repo.safe { deleteTanker(t.id) }
+                                            .onSuccess { refresh(); msg = "Tanker removed" }
+                                            .onFailure { msg = it.message }
+                                    }
+                                }) { Text("Delete", color = Coral) }
                             }
                         }
                     }
@@ -194,26 +233,115 @@ fun FleetHub(repo: TankerRepository) {
             }
             1 -> {
                 SoftField(boreName, { boreName = it }, "Bore name")
-                SoftField(boreAddress, { boreAddress = it }, "Bore address")
+                SoftField(boreAddress, { boreAddress = it }, "Bore address / landmark")
+                SoftField(boreMapsLink, { boreMapsLink = it }, "Paste Google Maps link")
+                Text(
+                    "Paste Maps link preferred — lat/lng optional if link is provided.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    SoftField(boreLat, { boreLat = it }, "Lat", modifier = Modifier.weight(1f))
-                    SoftField(boreLng, { boreLng = it }, "Lng", modifier = Modifier.weight(1f))
+                    SoftField(boreLat, { boreLat = it }, "Lat (optional)", modifier = Modifier.weight(1f))
+                    SoftField(boreLng, { boreLng = it }, "Lng (optional)", modifier = Modifier.weight(1f))
                 }
-                PrimaryButton("Save primary bore", onClick = {
-                    scope.launch {
-                        repo.safe {
-                            addBore(
-                                BoreRequest(
-                                    name = boreName,
-                                    address = boreAddress.ifBlank { "Bore yard" },
-                                    latitude = boreLat.toDoubleOrNull() ?: 17.385,
-                                    longitude = boreLng.toDoubleOrNull() ?: 78.4867,
-                                    primaryBore = true
-                                )
+                PrimaryButton(
+                    if (editingBoreId == null) "Add bore" else "Save bore changes",
+                    onClick = {
+                        if (boreName.isBlank()) {
+                            msg = "Bore name required"
+                            return@PrimaryButton
+                        }
+                        if (boreMapsLink.isBlank() && (boreLat.toDoubleOrNull() == null || boreLng.toDoubleOrNull() == null)) {
+                            msg = "Paste Maps link or enter lat/lng"
+                            return@PrimaryButton
+                        }
+                        scope.launch {
+                            msg = if (boreMapsLink.isNotBlank()) "Reading bore location from Maps…" else null
+                            val (link, lat, lng) = MapsLinkResolver.resolveForApi(
+                                context,
+                                boreMapsLink.ifBlank { null },
+                                boreLat.toDoubleOrNull(),
+                                boreLng.toDoubleOrNull()
                             )
-                        }.onSuccess { msg = "Bore saved" }.onFailure { msg = it.message }
+                            if (lat == null || lng == null) {
+                                msg = "Could not read bore location — check Maps link or lat/lng"
+                                return@launch
+                            }
+                            val body = BoreRequest(
+                                name = boreName.trim(),
+                                address = boreAddress.ifBlank { "Bore yard" },
+                                mapsLink = link ?: boreMapsLink.ifBlank { null },
+                                latitude = lat,
+                                longitude = lng,
+                                primaryBore = editingBoreId == null || bores.none { it.primaryBore == true }
+                            )
+                            val editId = editingBoreId
+                            val result = if (editId == null) {
+                                repo.safe { addBore(body) }
+                            } else {
+                                repo.safe { updateBore(editId, body.copy(primaryBore = bores.any { it.id == editId && it.primaryBore == true })) }
+                            }
+                            result.onSuccess {
+                                boreName = "Main Bore"; boreAddress = ""; boreMapsLink = ""
+                                boreLat = "17.3850"; boreLng = "78.4867"; editingBoreId = null
+                                refresh(); msg = if (editId == null) "Bore added" else "Bore updated"
+                            }.onFailure { msg = it.message }
+                        }
                     }
-                })
+                )
+                if (editingBoreId != null) {
+                    TextButton(onClick = {
+                        editingBoreId = null
+                        boreName = "Main Bore"; boreAddress = ""; boreMapsLink = ""
+                    }) { Text("Cancel edit") }
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                Text("Bores (${bores.size})", fontWeight = FontWeight.SemiBold)
+                LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    items(bores, key = { it.id }) { b ->
+                        GlassCard {
+                            Text(
+                                (b.name ?: "Bore") + if (b.primaryBore == true) " · Primary" else "",
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(b.address ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            if (!b.mapsLink.isNullOrBlank()) {
+                                Text("Maps link saved", style = MaterialTheme.typography.bodySmall, color = LagoonDeep)
+                            }
+                            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                TextButton(onClick = {
+                                    editingBoreId = b.id
+                                    boreName = b.name.orEmpty()
+                                    boreAddress = b.address.orEmpty()
+                                    boreMapsLink = b.mapsLink.orEmpty()
+                                    boreLat = b.latitude?.toString() ?: ""
+                                    boreLng = b.longitude?.toString() ?: ""
+                                }) { Text("Edit") }
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        repo.safe { updateBore(b.id, BoreRequest(
+                                            name = b.name ?: "Bore",
+                                            address = b.address,
+                                            mapsLink = b.mapsLink,
+                                            latitude = b.latitude,
+                                            longitude = b.longitude,
+                                            primaryBore = true
+                                        )) }
+                                            .onSuccess { refresh(); msg = "Set as primary bore" }
+                                            .onFailure { msg = it.message }
+                                    }
+                                }) { Text("Make primary") }
+                                TextButton(onClick = {
+                                    scope.launch {
+                                        repo.safe { deleteBore(b.id) }
+                                            .onSuccess { refresh(); msg = "Bore removed" }
+                                            .onFailure { msg = it.message }
+                                    }
+                                }) { Text("Delete", color = Coral) }
+                            }
+                        }
+                    }
+                }
             }
             2 -> {
                 if (isOwner) {
@@ -236,19 +364,57 @@ fun FleetHub(repo: TankerRepository) {
                                 .onFailure { msg = it.message }
                         }
                     })
+                    FilterChip(
+                        selected = showResignedDrivers,
+                        onClick = {
+                            showResignedDrivers = !showResignedDrivers
+                            refresh()
+                        },
+                        label = { Text(if (showResignedDrivers) "Showing resigned too" else "Show resigned") }
+                    )
                 } else {
                     Text("Only the owner can create drivers.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 Spacer(modifier = Modifier.height(12.dp))
                 LazyColumn(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     items(drivers, key = { it.id }) { d ->
+                        val resigned = d.active == false
                         GlassCard {
                             Text(d.fullName ?: "Driver", fontWeight = FontWeight.Bold)
                             Text(d.phone ?: "")
                             Text(
-                                if (d.available == true) "Available" else "On duty",
-                                color = if (d.available == true) LagoonDeep else Coral
+                                when {
+                                    resigned -> "Resigned"
+                                    d.available == true -> "Active · Available"
+                                    else -> "Active · On trip"
+                                },
+                                color = when {
+                                    resigned -> Coral
+                                    d.available == true -> LagoonDeep
+                                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                                }
                             )
+                            if (isOwner) {
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    if (resigned) {
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                repo.safe { setDriverStatus(d.id, DriverStatusRequest(active = true)) }
+                                                    .onSuccess { refresh(); msg = "Driver set to Active" }
+                                                    .onFailure { msg = it.message }
+                                            }
+                                        }) { Text("Make Active") }
+                                    } else {
+                                        TextButton(onClick = {
+                                            scope.launch {
+                                                repo.safe { setDriverStatus(d.id, DriverStatusRequest(active = false)) }
+                                                    .onSuccess { refresh(); msg = "Driver marked Resigned" }
+                                                    .onFailure { msg = it.message }
+                                            }
+                                        }) { Text("Mark Resigned", color = Coral) }
+                                    }
+                                }
+                            }
                         }
                     }
                 }

@@ -15,8 +15,11 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Instant;
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -25,9 +28,18 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class TripService {
 
+    private static final ZoneId IST = ZoneId.of("Asia/Kolkata");
+
     private static final Set<TripStatus> ACTIVE = EnumSet.of(
             TripStatus.ASSIGNED, TripStatus.GOING_FOR_LOADING, TripStatus.LOADING,
             TripStatus.LOADING_COMPLETED, TripStatus.EN_ROUTE, TripStatus.ARRIVED, TripStatus.UNLOADING);
+
+    private static final Set<TripStatus> IN_PROGRESS = EnumSet.of(
+            TripStatus.ASSIGNED, TripStatus.GOING_FOR_LOADING, TripStatus.LOADING,
+            TripStatus.LOADING_COMPLETED, TripStatus.EN_ROUTE, TripStatus.ARRIVED, TripStatus.UNLOADING);
+
+    private static final Set<TripStatus> SWAPPABLE = EnumSet.of(
+            TripStatus.QUEUED, TripStatus.ASSIGNED);
 
     /** Arrive within ~180m */
     private static final double ARRIVE_KM = 0.18;
@@ -126,20 +138,24 @@ public class TripService {
 
         Tanker tanker = tankerRepository.findByIdAndOperatorId(req.getTankerId(), operatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Tanker not found"));
-        if (tanker.getStatus() != TankerStatus.AVAILABLE) {
-            throw new BadRequestException("Tanker is not available");
+        if (tanker.getStatus() == TankerStatus.MAINTENANCE || tanker.getStatus() == TankerStatus.INACTIVE
+                || !tanker.isActive()) {
+            throw new BadRequestException("Tanker is not available for trips");
         }
 
         Driver driver = driverRepository.findByIdAndOperatorId(req.getDriverId(), operatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Driver not found"));
-        if (!driver.isAvailable() || !driver.isActive()) {
-            throw new BadRequestException("Driver is not available");
+        if (!driver.isActive()) {
+            throw new BadRequestException("Driver is resigned / inactive");
         }
 
         BoreLocation bore;
         if (req.getBoreId() != null) {
             bore = boreRepository.findByIdAndOperatorId(req.getBoreId(), operatorId)
                     .orElseThrow(() -> new ResourceNotFoundException("Bore not found"));
+            if (!bore.isActive()) {
+                throw new BadRequestException("Selected bore is inactive");
+            }
         } else {
             bore = boreRepository.findFirstByOperatorIdAndPrimaryBoreTrueAndActiveTrue(operatorId)
                     .or(() -> boreRepository.findByOperatorIdAndActiveTrue(operatorId).stream().findFirst())
@@ -150,6 +166,16 @@ public class TripService {
 
         int eta = etaService.estimateMinutes(bore.getLatitude(), bore.getLongitude(), dropLat, dropLng);
 
+        boolean tankerBusy = tanker.getStatus() == TankerStatus.ON_TRIP
+                || tripRepository.existsActiveOnTanker(tanker.getId(), IN_PROGRESS, null);
+
+        TripStatus initialStatus = tankerBusy ? TripStatus.QUEUED : TripStatus.ASSIGNED;
+        Integer queuePosition = null;
+        if (tankerBusy) {
+            Integer max = tripRepository.maxQueuePosition(tanker.getId(), TripStatus.QUEUED);
+            queuePosition = (max == null ? 0 : max) + 1;
+        }
+
         Trip trip = Trip.builder()
                 .tripCode("TRP-" + Instant.now().getEpochSecond() + "-" + (int) (Math.random() * 900 + 100))
                 .operator(operator)
@@ -159,16 +185,17 @@ public class TripService {
                 .bore(bore)
                 .bookedBy(bookedBy)
                 .customerLocation(savedLoc)
-                .status(TripStatus.ASSIGNED)
+                .status(initialStatus)
+                .queuePosition(queuePosition)
                 .dropAddress(dropAddress)
                 .dropLat(dropLat)
                 .dropLng(dropLng)
                 .tripAmount(tripAmount)
                 .amountPaid(java.math.BigDecimal.ZERO)
                 .etaMinutes(eta)
-                .assignedAt(Instant.now())
+                .assignedAt(initialStatus == TripStatus.ASSIGNED ? Instant.now() : null)
                 .trackingToken(UUID.randomUUID().toString().replace("-", ""))
-                .trackingEnabled(true)
+                .trackingEnabled(initialStatus == TripStatus.ASSIGNED)
                 .notes(req.getNotes())
                 .build();
 
@@ -179,10 +206,130 @@ public class TripService {
         driver.setAvailable(false);
         driverRepository.save(driver);
 
-        recordHistory(trip, TripStatus.ASSIGNED, TripStatus.ASSIGNED, bookedBy, "Trip booked and assigned", true);
-        smsService.sendTripSms(trip, TripStatus.ASSIGNED);
+        String note = tankerBusy
+                ? "Trip queued at position " + queuePosition + " — starts after current trip"
+                : "Trip booked and assigned";
+        recordHistory(trip, initialStatus, initialStatus, bookedBy, note, initialStatus == TripStatus.ASSIGNED);
+        if (initialStatus == TripStatus.ASSIGNED) {
+            smsService.sendTripSms(trip, TripStatus.ASSIGNED);
+        }
 
         return toResponse(trip, true);
+    }
+
+    @Transactional(readOnly = true)
+    public DistancePreviewResponse previewDistance(DistancePreviewRequest req) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        BoreLocation bore;
+        if (req.getBoreId() != null) {
+            bore = boreRepository.findByIdAndOperatorId(req.getBoreId(), operatorId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Bore not found"));
+        } else {
+            bore = boreRepository.findFirstByOperatorIdAndPrimaryBoreTrueAndActiveTrue(operatorId)
+                    .or(() -> boreRepository.findByOperatorIdAndActiveTrue(operatorId).stream().findFirst())
+                    .orElseThrow(() -> new BadRequestException("No bore location configured"));
+        }
+
+        java.math.BigDecimal dropLat = req.getDropLat();
+        java.math.BigDecimal dropLng = req.getDropLng();
+        if (req.getCustomerLocationId() != null) {
+            CustomerLocation loc = customerLocationRepository
+                    .findByIdAndCustomerOperatorId(req.getCustomerLocationId(), operatorId)
+                    .orElseThrow(() -> new ResourceNotFoundException("Customer location not found"));
+            dropLat = loc.getLatitude();
+            dropLng = loc.getLongitude();
+        } else if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
+            var coords = com.tankermanager.util.MapsLinkParser.resolve(dropLat, dropLng, req.getMapsLink());
+            dropLat = coords.latitude();
+            dropLng = coords.longitude();
+        }
+        if (dropLat == null || dropLng == null) {
+            throw new BadRequestException("Select customer location or provide drop coordinates / Maps link");
+        }
+
+        double km = etaService.distanceKm(bore.getLatitude(), bore.getLongitude(), dropLat, dropLng);
+        int eta = etaService.estimateMinutes(bore.getLatitude(), bore.getLongitude(), dropLat, dropLng);
+        return DistancePreviewResponse.builder()
+                .boreId(bore.getId())
+                .boreName(bore.getName())
+                .distanceKm(round1(km))
+                .etaMinutes(eta)
+                .build();
+    }
+
+    @Transactional
+    public List<TripResponse> swapTrips(Long tripId, Long otherTripId) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        if (tripId.equals(otherTripId)) {
+            throw new BadRequestException("Select two different trips to swap");
+        }
+        Trip a = tripRepository.findByIdAndOperatorId(tripId, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Trip not found"));
+        Trip b = tripRepository.findByIdAndOperatorId(otherTripId, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Other trip not found"));
+        if (!a.getTanker().getId().equals(b.getTanker().getId())) {
+            throw new BadRequestException("Can only swap trips on the same tanker");
+        }
+        if (!SWAPPABLE.contains(a.getStatus()) || !SWAPPABLE.contains(b.getStatus())) {
+            throw new BadRequestException("Only queued or newly assigned trips can be swapped");
+        }
+
+        // Swap queue slots / active assignment between the two trips
+        TripStatus statusA = a.getStatus();
+        TripStatus statusB = b.getStatus();
+        Integer posA = a.getQueuePosition();
+        Integer posB = b.getQueuePosition();
+        Instant assignedA = a.getAssignedAt();
+        Instant assignedB = b.getAssignedAt();
+        boolean trackA = a.isTrackingEnabled();
+        boolean trackB = b.isTrackingEnabled();
+
+        a.setStatus(statusB);
+        a.setQueuePosition(posB);
+        a.setAssignedAt(assignedB);
+        a.setTrackingEnabled(trackB);
+
+        b.setStatus(statusA);
+        b.setQueuePosition(posA);
+        b.setAssignedAt(assignedA);
+        b.setTrackingEnabled(trackA);
+
+        // Normalize: ASSIGNED must have null queue; QUEUED must have a position
+        normalizeQueueFields(a);
+        normalizeQueueFields(b);
+
+        tripRepository.save(a);
+        tripRepository.save(b);
+
+        UserAccount by = userAccountRepository.findById(SecurityUtils.currentUser().getId()).orElse(null);
+        recordHistory(a, statusA, a.getStatus(), by, "Swapped with " + b.getTripCode(), false);
+        recordHistory(b, statusB, b.getStatus(), by, "Swapped with " + a.getTripCode(), false);
+
+        if (a.getStatus() == TripStatus.ASSIGNED && statusA != TripStatus.ASSIGNED) {
+            smsService.sendTripSms(a, TripStatus.ASSIGNED);
+        }
+        if (b.getStatus() == TripStatus.ASSIGNED && statusB != TripStatus.ASSIGNED) {
+            smsService.sendTripSms(b, TripStatus.ASSIGNED);
+        }
+
+        return List.of(toResponse(a, false), toResponse(b, false));
+    }
+
+    private void normalizeQueueFields(Trip trip) {
+        if (trip.getStatus() == TripStatus.ASSIGNED) {
+            trip.setQueuePosition(null);
+            if (trip.getAssignedAt() == null) {
+                trip.setAssignedAt(Instant.now());
+            }
+            trip.setTrackingEnabled(true);
+        } else if (trip.getStatus() == TripStatus.QUEUED) {
+            if (trip.getQueuePosition() == null) {
+                Integer max = tripRepository.maxQueuePosition(trip.getTanker().getId(), TripStatus.QUEUED);
+                trip.setQueuePosition((max == null ? 0 : max) + 1);
+            }
+            trip.setAssignedAt(null);
+            trip.setTrackingEnabled(false);
+        }
     }
 
     @Transactional
@@ -210,21 +357,7 @@ public class TripService {
         }
 
         if (to == TripStatus.COMPLETED || to == TripStatus.CANCELLED) {
-            trip.setCompletedAt(Instant.now());
-            trip.setTrackingEnabled(false);
-            trip.getTanker().setStatus(TankerStatus.AVAILABLE);
-            boolean otherActive = tripRepository
-                    .findByDriverIdAndStatusNotIn(trip.getDriver().getId(),
-                            List.of(TripStatus.COMPLETED, TripStatus.CANCELLED))
-                    .stream()
-                    .anyMatch(t -> !t.getId().equals(trip.getId()));
-            trip.getDriver().setAvailable(!otherActive);
-            if (to == TripStatus.COMPLETED) {
-                Driver d = trip.getDriver();
-                d.setTotalTripsCompleted(d.getTotalTripsCompleted() + 1);
-            }
-            tankerRepository.save(trip.getTanker());
-            driverRepository.save(trip.getDriver());
+            finishTripAndPromoteQueue(trip, from, to == TripStatus.COMPLETED);
         }
 
         tripRepository.save(trip);
@@ -336,23 +469,89 @@ public class TripService {
             trip.setStartedAt(Instant.now());
         }
         if (to == TripStatus.COMPLETED || to == TripStatus.CANCELLED) {
-            trip.setCompletedAt(Instant.now());
-            trip.setTrackingEnabled(false);
-            trip.getTanker().setStatus(TankerStatus.AVAILABLE);
+            finishTripAndPromoteQueue(trip, from, to == TripStatus.COMPLETED);
+        }
+        boolean sent = sms && smsService.sendTripSms(trip, to);
+        recordHistory(trip, from, to, by, note, sent);
+    }
+
+    /**
+     * Mark trip finished, then start the next QUEUED trip for the same tanker (if any).
+     * Cancelling a QUEUED trip only renumbers the queue — does not free the tanker.
+     */
+    private void finishTripAndPromoteQueue(Trip trip, TripStatus previousStatus, boolean completed) {
+        boolean wasQueued = previousStatus == TripStatus.QUEUED;
+        boolean otherInProgress = tripRepository.existsActiveOnTanker(
+                trip.getTanker().getId(), IN_PROGRESS, trip.getId());
+
+        trip.setCompletedAt(Instant.now());
+        trip.setTrackingEnabled(false);
+        trip.setQueuePosition(null);
+        if (completed) {
+            Driver d = trip.getDriver();
+            d.setTotalTripsCompleted(d.getTotalTripsCompleted() + 1);
+        }
+
+        List<Trip> queued = tripRepository
+                .findByTankerIdAndStatusOrderByQueuePositionAsc(trip.getTanker().getId(), TripStatus.QUEUED)
+                .stream()
+                .filter(t -> !t.getId().equals(trip.getId()))
+                .collect(Collectors.toList());
+
+        // Still on another trip, or cancelled a queued slot — compact queue only
+        if (otherInProgress || wasQueued) {
+            int pos = 1;
+            for (Trip q : queued) {
+                q.setQueuePosition(pos++);
+                tripRepository.save(q);
+            }
+            if (otherInProgress || !queued.isEmpty()) {
+                trip.getTanker().setStatus(TankerStatus.ON_TRIP);
+            } else {
+                trip.getTanker().setStatus(TankerStatus.AVAILABLE);
+            }
+            tankerRepository.save(trip.getTanker());
             boolean otherActive = tripRepository
                     .findByDriverIdAndStatusNotIn(trip.getDriver().getId(),
                             List.of(TripStatus.COMPLETED, TripStatus.CANCELLED))
                     .stream()
                     .anyMatch(t -> !t.getId().equals(trip.getId()));
             trip.getDriver().setAvailable(!otherActive);
-            if (to == TripStatus.COMPLETED) {
-                trip.getDriver().setTotalTripsCompleted(trip.getDriver().getTotalTripsCompleted() + 1);
+            driverRepository.save(trip.getDriver());
+            return;
+        }
+
+        if (!queued.isEmpty()) {
+            Trip next = queued.get(0);
+            next.setStatus(TripStatus.ASSIGNED);
+            next.setQueuePosition(null);
+            next.setAssignedAt(Instant.now());
+            next.setTrackingEnabled(true);
+            tripRepository.save(next);
+            int pos = 1;
+            for (int i = 1; i < queued.size(); i++) {
+                Trip q = queued.get(i);
+                q.setQueuePosition(pos++);
+                tripRepository.save(q);
             }
+            trip.getTanker().setStatus(TankerStatus.ON_TRIP);
+            next.getDriver().setAvailable(false);
+            driverRepository.save(next.getDriver());
             tankerRepository.save(trip.getTanker());
+            recordHistory(next, TripStatus.QUEUED, TripStatus.ASSIGNED, null,
+                    "Auto-started from queue after previous trip finished", true);
+            smsService.sendTripSms(next, TripStatus.ASSIGNED);
+        } else {
+            trip.getTanker().setStatus(TankerStatus.AVAILABLE);
+            tankerRepository.save(trip.getTanker());
+            boolean otherActive = tripRepository
+                    .findByDriverIdAndStatusNotIn(trip.getDriver().getId(),
+                            List.of(TripStatus.COMPLETED, TripStatus.CANCELLED))
+                    .stream()
+                    .anyMatch(t -> !t.getId().equals(trip.getId()));
+            trip.getDriver().setAvailable(!otherActive);
             driverRepository.save(trip.getDriver());
         }
-        boolean sent = sms && smsService.sendTripSms(trip, to);
-        recordHistory(trip, from, to, by, note, sent);
     }
 
     @Transactional
@@ -450,10 +649,57 @@ public class TripService {
 
     @Transactional(readOnly = true)
     public List<TripResponse> listForOperator() {
+        return listForOperator(null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TripResponse> listForOperator(String period, List<Long> tankerIds) {
         Long operatorId = SecurityUtils.requireOperatorId();
-        return tripRepository.findByOperatorIdOrderByCreatedAtDesc(operatorId).stream()
-                .map(t -> toResponse(t, false))
+        Instant from = null;
+        Instant to = null;
+        String p = period == null ? "ALL" : period.trim().toUpperCase(Locale.ROOT);
+        LocalDate today = LocalDate.now(IST);
+        switch (p) {
+            case "DAY", "TODAY" -> {
+                from = today.atStartOfDay(IST).toInstant();
+                to = today.plusDays(1).atStartOfDay(IST).toInstant();
+            }
+            case "WEEK" -> {
+                LocalDate start = today.minusDays(today.getDayOfWeek().getValue() - 1L);
+                from = start.atStartOfDay(IST).toInstant();
+                to = start.plusWeeks(1).atStartOfDay(IST).toInstant();
+            }
+            case "MONTH" -> {
+                LocalDate start = today.withDayOfMonth(1);
+                from = start.atStartOfDay(IST).toInstant();
+                to = start.plusMonths(1).atStartOfDay(IST).toInstant();
+            }
+            default -> {
+                // ALL — no date bound
+            }
+        }
+
+        List<Long> ids = tankerIds == null ? List.of() : tankerIds.stream()
+                .filter(id -> id != null && id > 0)
+                .distinct()
                 .collect(Collectors.toList());
+
+        List<Trip> trips;
+        if (from == null) {
+            trips = ids.isEmpty()
+                    ? tripRepository.findByOperatorIdOrderByCreatedAtDesc(operatorId)
+                    : tripRepository.findByOperatorIdOrderByCreatedAtDesc(operatorId).stream()
+                    .filter(t -> ids.contains(t.getTanker().getId()))
+                    .collect(Collectors.toList());
+        } else if (ids.isEmpty()) {
+            trips = tripRepository.findByOperatorIdAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+                    operatorId, from, to);
+        } else {
+            trips = tripRepository.findByOperatorIdAndTankerIdInAndCreatedAtGreaterThanEqualAndCreatedAtLessThanOrderByCreatedAtDesc(
+                    operatorId, ids, from, to);
+        }
+
+        return trips.stream().map(t -> toResponse(t, false)).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
@@ -473,6 +719,16 @@ public class TripService {
                 .orElseThrow(() -> new ResourceNotFoundException("Driver profile not found"));
         return tripRepository.findByDriverIdAndStatusNotIn(driver.getId(),
                         List.of(TripStatus.COMPLETED, TripStatus.CANCELLED)).stream()
+                .sorted((a, b) -> {
+                    boolean qa = a.getStatus() == TripStatus.QUEUED;
+                    boolean qb = b.getStatus() == TripStatus.QUEUED;
+                    if (qa != qb) {
+                        return qa ? 1 : -1;
+                    }
+                    int pa = a.getQueuePosition() != null ? a.getQueuePosition() : 0;
+                    int pb = b.getQueuePosition() != null ? b.getQueuePosition() : 0;
+                    return Integer.compare(pa, pb);
+                })
                 .map(t -> toResponse(t, false))
                 .collect(Collectors.toList());
     }
@@ -537,8 +793,11 @@ public class TripService {
     }
 
     private boolean isValidTransition(TripStatus from, TripStatus to) {
-        if (to == TripStatus.CANCELLED) return from != TripStatus.COMPLETED;
+        if (to == TripStatus.CANCELLED) {
+            return from != TripStatus.COMPLETED && from != TripStatus.CANCELLED;
+        }
         return switch (from) {
+            case QUEUED -> false; // promoted only via finish/swap
             case ASSIGNED -> to == TripStatus.GOING_FOR_LOADING || to == TripStatus.LOADING;
             case GOING_FOR_LOADING -> to == TripStatus.LOADING;
             case LOADING -> to == TripStatus.LOADING_COMPLETED;
@@ -567,7 +826,8 @@ public class TripService {
         java.math.BigDecimal amountDue = tripAmount.subtract(amountPaid).max(java.math.BigDecimal.ZERO);
 
         String navigateUrl;
-        if (trip.getStatus() == TripStatus.ASSIGNED
+        if (trip.getStatus() == TripStatus.QUEUED
+                || trip.getStatus() == TripStatus.ASSIGNED
                 || trip.getStatus() == TripStatus.GOING_FOR_LOADING
                 || trip.getStatus() == TripStatus.LOADING) {
             navigateUrl = "https://www.google.com/maps/dir/?api=1&destination="
@@ -581,14 +841,17 @@ public class TripService {
                 .id(trip.getId())
                 .tripCode(trip.getTripCode())
                 .status(trip.getStatus())
+                .queuePosition(trip.getQueuePosition())
                 .customerName(trip.getCustomer().getName())
                 .customerPhone(trip.getCustomer().getPhone())
                 .customerId(trip.getCustomer().getId())
                 .customerLocationId(trip.getCustomerLocation() != null ? trip.getCustomerLocation().getId() : null)
+                .tankerId(trip.getTanker().getId())
                 .tankerNumber(trip.getTanker().getVehicleNumber())
                 .driverId(trip.getDriver().getId())
                 .driverName(trip.getDriver().getUser().getFullName())
                 .driverPhone(trip.getDriver().getUser().getPhone())
+                .boreId(trip.getBore().getId())
                 .boreName(trip.getBore().getName())
                 .dropAddress(trip.getDropAddress())
                 .dropLat(trip.getDropLat())
@@ -608,6 +871,7 @@ public class TripService {
                 .assignedAt(trip.getAssignedAt())
                 .startedAt(trip.getStartedAt())
                 .completedAt(trip.getCompletedAt())
+                .createdAt(trip.getCreatedAt())
                 .notes(trip.getNotes());
 
         if (withHistory) {

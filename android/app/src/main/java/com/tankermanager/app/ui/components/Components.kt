@@ -245,6 +245,7 @@ fun StatusPill(status: String?) {
 }
 
 fun friendlyStatus(status: String?): String = when (status) {
+    "QUEUED" -> "Queued"
     "ASSIGNED" -> "Assigned"
     "GOING_FOR_LOADING" -> "Going to bore"
     "LOADING" -> "Loading"
@@ -261,6 +262,7 @@ fun statusColors(status: String?): Pair<Color, Color> = when (status) {
     "COMPLETED" -> Success.copy(alpha = 0.15f) to Success
     "EN_ROUTE", "LOADING_COMPLETED" -> Lagoon.copy(alpha = 0.15f) to LagoonDeep
     "CANCELLED" -> Color(0xFFFFEBEE) to Color(0xFFC62828)
+    "QUEUED" -> Mist to LagoonDeep
     "ASSIGNED", "GOING_FOR_LOADING" -> Sun.copy(alpha = 0.2f) to Color(0xFF8A6A00)
     "LOADING", "UNLOADING", "ARRIVED" -> Warning.copy(alpha = 0.18f) to Color(0xFF8A6A00)
     else -> Mist to LagoonDeep

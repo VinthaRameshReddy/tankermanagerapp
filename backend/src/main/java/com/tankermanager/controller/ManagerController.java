@@ -8,7 +8,9 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Arrays;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/manager")
@@ -35,6 +37,17 @@ public class ManagerController {
         return fleetService.addTanker(request);
     }
 
+    @PatchMapping("/tankers/{id}")
+    public TankerResponse updateTanker(@PathVariable Long id, @Valid @RequestBody TankerRequest request) {
+        return fleetService.updateTanker(id, request);
+    }
+
+    @DeleteMapping("/tankers/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteTanker(@PathVariable Long id) {
+        fleetService.deleteTanker(id);
+    }
+
     @GetMapping("/tankers")
     public List<TankerResponse> listTankers() {
         return fleetService.listTankers();
@@ -42,13 +55,21 @@ public class ManagerController {
 
     // Drivers
     @GetMapping("/drivers")
-    public List<DriverResponse> listDrivers() {
-        return fleetService.listDrivers();
+    public List<DriverResponse> listDrivers(
+            @RequestParam(defaultValue = "false") boolean includeResigned) {
+        return fleetService.listDrivers(includeResigned);
     }
 
     @GetMapping("/drivers/available")
     public List<DriverResponse> availableDrivers() {
         return fleetService.availableDrivers();
+    }
+
+    @PatchMapping("/drivers/{id}/status")
+    public DriverResponse setDriverStatus(
+            @PathVariable Long id,
+            @Valid @RequestBody DriverStatusRequest request) {
+        return fleetService.setDriverActive(id, Boolean.TRUE.equals(request.getActive()));
     }
 
     @GetMapping("/managers")
@@ -106,6 +127,17 @@ public class ManagerController {
         return fleetService.addBore(request);
     }
 
+    @PatchMapping("/bores/{id}")
+    public BoreResponse updateBore(@PathVariable Long id, @Valid @RequestBody BoreRequest request) {
+        return fleetService.updateBore(id, request);
+    }
+
+    @DeleteMapping("/bores/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void deleteBore(@PathVariable Long id) {
+        fleetService.deleteBore(id);
+    }
+
     @GetMapping("/bores")
     public List<BoreResponse> listBores() {
         return fleetService.listBores();
@@ -119,13 +151,28 @@ public class ManagerController {
     }
 
     @GetMapping("/trips")
-    public List<TripResponse> listTrips() {
-        return tripService.listForOperator();
+    public List<TripResponse> listTrips(
+            @RequestParam(required = false) String period,
+            @RequestParam(required = false) String tankerIds) {
+        List<Long> ids = parseIds(tankerIds);
+        return tripService.listForOperator(period, ids);
     }
 
     @GetMapping("/trips/{id}")
     public TripResponse getTrip(@PathVariable Long id) {
         return tripService.getTrip(id);
+    }
+
+    @PostMapping("/trips/{id}/swap")
+    public List<TripResponse> swapTrips(
+            @PathVariable Long id,
+            @Valid @RequestBody SwapTripRequest request) {
+        return tripService.swapTrips(id, request.getOtherTripId());
+    }
+
+    @PostMapping("/trips/distance-preview")
+    public DistancePreviewResponse distancePreview(@RequestBody DistancePreviewRequest request) {
+        return tripService.previewDistance(request);
     }
 
     @PatchMapping("/trips/{id}/status")
@@ -176,5 +223,16 @@ public class ManagerController {
     @GetMapping("/salaries")
     public List<SalaryResponse> listSalaries() {
         return fleetService.listSalaries();
+    }
+
+    private static List<Long> parseIds(String csv) {
+        if (csv == null || csv.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(csv.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .map(Long::valueOf)
+                .collect(Collectors.toList());
     }
 }

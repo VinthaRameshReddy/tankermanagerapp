@@ -76,6 +76,8 @@ public class SmsService {
         String eta = trip.getEtaMinutes() != null ? trip.getEtaMinutes() + " mins" : "soon";
         String track = trackUrl(trip.getTrackingToken());
         return switch (status) {
+            case QUEUED -> "Trip " + trip.getTripCode() + " is queued for vehicle " + vehicle
+                    + ". You will get tracking when the trip starts.";
             case ASSIGNED -> "Trip " + trip.getTripCode() + " assigned. Vehicle " + vehicle
                     + " going to load at bore. Track: " + track;
             case GOING_FOR_LOADING -> "Vehicle " + vehicle + " is going for loading at bore.";

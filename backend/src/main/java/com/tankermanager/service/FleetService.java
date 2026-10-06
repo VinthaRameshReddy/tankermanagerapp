@@ -54,21 +54,86 @@ public class FleetService {
         return toTanker(tanker);
     }
 
+    @Transactional
+    public TankerResponse updateTanker(Long id, TankerRequest req) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Tanker tanker = tankerRepository.findByIdAndOperatorId(id, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tanker not found"));
+        String number = req.getVehicleNumber().toUpperCase().trim();
+        if (!number.equalsIgnoreCase(tanker.getVehicleNumber())
+                && tankerRepository.existsByOperatorIdAndVehicleNumber(operatorId, number)) {
+            throw new BadRequestException("Vehicle number already exists");
+        }
+        tanker.setVehicleNumber(number);
+        if (req.getModel() != null) {
+            tanker.setModel(req.getModel());
+        }
+        if (req.getCapacityLitres() != null) {
+            tanker.setCapacityLitres(req.getCapacityLitres());
+        }
+        return toTanker(tankerRepository.save(tanker));
+    }
+
+    @Transactional
+    public void deleteTanker(Long id) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Tanker tanker = tankerRepository.findByIdAndOperatorId(id, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Tanker not found"));
+        if (tanker.getStatus() == TankerStatus.ON_TRIP) {
+            throw new BadRequestException("Cannot delete a tanker that is on a trip or has queued trips");
+        }
+        boolean hasQueue = tripRepository.existsActiveOnTanker(
+                tanker.getId(),
+                List.of(TripStatus.QUEUED, TripStatus.ASSIGNED, TripStatus.GOING_FOR_LOADING,
+                        TripStatus.LOADING, TripStatus.LOADING_COMPLETED, TripStatus.EN_ROUTE,
+                        TripStatus.ARRIVED, TripStatus.UNLOADING),
+                null);
+        if (hasQueue) {
+            throw new BadRequestException("Cannot delete a tanker with active or queued trips");
+        }
+        tanker.setActive(false);
+        tanker.setStatus(TankerStatus.INACTIVE);
+        tankerRepository.save(tanker);
+    }
+
     public List<TankerResponse> listTankers() {
         return tankerRepository.findByOperatorIdAndActiveTrue(SecurityUtils.requireOperatorId())
                 .stream().map(this::toTanker).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
-    public List<DriverResponse> listDrivers() {
-        return driverRepository.findByOperatorIdAndActiveTrue(SecurityUtils.requireOperatorId())
-                .stream().map(this::toDriver).collect(Collectors.toList());
+    public List<DriverResponse> listDrivers(boolean includeResigned) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        List<Driver> drivers = includeResigned
+                ? driverRepository.findByOperatorId(operatorId)
+                : driverRepository.findByOperatorIdAndActiveTrue(operatorId);
+        return drivers.stream().map(this::toDriver).collect(Collectors.toList());
     }
 
     @Transactional(readOnly = true)
     public List<DriverResponse> availableDrivers() {
         return driverRepository.findByOperatorIdAndAvailableTrueAndActiveTrue(SecurityUtils.requireOperatorId())
                 .stream().map(this::toDriver).collect(Collectors.toList());
+    }
+
+    @Transactional
+    public DriverResponse setDriverActive(Long driverId, boolean active) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        Driver driver = driverRepository.findByIdAndOperatorId(driverId, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Driver not found"));
+        if (!active && !driver.isAvailable()) {
+            throw new BadRequestException("Cannot resign a driver who is currently on a trip");
+        }
+        driver.setActive(active);
+        if (!active) {
+            driver.setAvailable(false);
+        } else {
+            driver.setAvailable(true);
+        }
+        UserAccount user = driver.getUser();
+        user.setActive(active);
+        userAccountRepository.save(user);
+        return toDriver(driverRepository.save(driver));
     }
 
     public List<StaffResponse> listManagers() {
@@ -236,27 +301,78 @@ public class FleetService {
         Long operatorId = SecurityUtils.requireOperatorId();
         Operator op = operatorRepository.findById(operatorId)
                 .orElseThrow(() -> new ResourceNotFoundException("Operator not found"));
+        var coords = resolveBoreCoords(req);
         if (req.isPrimaryBore()) {
-            boreRepository.findByOperatorIdAndActiveTrue(operatorId).forEach(b -> {
-                b.setPrimaryBore(false);
-                boreRepository.save(b);
-            });
+            clearPrimaryBores(operatorId);
         }
+        String address = (req.getAddress() != null && !req.getAddress().isBlank())
+                ? req.getAddress().trim()
+                : "Bore location";
         BoreLocation bore = boreRepository.save(BoreLocation.builder()
                 .operator(op)
-                .name(req.getName())
-                .address(req.getAddress())
-                .latitude(req.getLatitude())
-                .longitude(req.getLongitude())
+                .name(req.getName().trim())
+                .address(address)
+                .mapsLink(req.getMapsLink() != null ? req.getMapsLink().trim() : null)
+                .latitude(coords.latitude())
+                .longitude(coords.longitude())
                 .primaryBore(req.isPrimaryBore())
                 .active(true)
                 .build());
         return toBore(bore);
     }
 
+    @Transactional
+    public BoreResponse updateBore(Long id, BoreRequest req) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        BoreLocation bore = boreRepository.findByIdAndOperatorId(id, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Bore not found"));
+        if (req.getName() != null && !req.getName().isBlank()) {
+            bore.setName(req.getName().trim());
+        }
+        if (req.getAddress() != null && !req.getAddress().isBlank()) {
+            bore.setAddress(req.getAddress().trim());
+        }
+        if ((req.getMapsLink() != null && !req.getMapsLink().isBlank())
+                || (req.getLatitude() != null && req.getLongitude() != null)) {
+            var coords = resolveBoreCoords(req);
+            bore.setLatitude(coords.latitude());
+            bore.setLongitude(coords.longitude());
+            if (req.getMapsLink() != null && !req.getMapsLink().isBlank()) {
+                bore.setMapsLink(req.getMapsLink().trim());
+            }
+        }
+        if (req.isPrimaryBore()) {
+            clearPrimaryBores(operatorId);
+            bore.setPrimaryBore(true);
+        }
+        return toBore(boreRepository.save(bore));
+    }
+
+    @Transactional
+    public void deleteBore(Long id) {
+        Long operatorId = SecurityUtils.requireOperatorId();
+        BoreLocation bore = boreRepository.findByIdAndOperatorId(id, operatorId)
+                .orElseThrow(() -> new ResourceNotFoundException("Bore not found"));
+        bore.setActive(false);
+        bore.setPrimaryBore(false);
+        boreRepository.save(bore);
+    }
+
     public List<BoreResponse> listBores() {
         return boreRepository.findByOperatorIdAndActiveTrue(SecurityUtils.requireOperatorId())
                 .stream().map(this::toBore).collect(Collectors.toList());
+    }
+
+    private void clearPrimaryBores(Long operatorId) {
+        boreRepository.findByOperatorIdAndActiveTrue(operatorId).forEach(b -> {
+            b.setPrimaryBore(false);
+            boreRepository.save(b);
+        });
+    }
+
+    private com.tankermanager.util.MapsLinkParser.Coords resolveBoreCoords(BoreRequest req) {
+        return com.tankermanager.util.MapsLinkParser.resolve(
+                req.getLatitude(), req.getLongitude(), req.getMapsLink());
     }
 
     @Transactional
@@ -353,6 +469,7 @@ public class FleetService {
                 .onTripTankers(tankers.stream().filter(t -> t.getStatus() == TankerStatus.ON_TRIP).count())
                 .totalDrivers(driverRepository.findByOperatorIdAndActiveTrue(operatorId).size())
                 .activeTrips(tripRepository.findByOperatorIdAndStatus(operatorId, TripStatus.EN_ROUTE).size()
+                        + tripRepository.findByOperatorIdAndStatus(operatorId, TripStatus.QUEUED).size()
                         + tripRepository.findByOperatorIdAndStatus(operatorId, TripStatus.ASSIGNED).size()
                         + tripRepository.findByOperatorIdAndStatus(operatorId, TripStatus.GOING_FOR_LOADING).size()
                         + tripRepository.findByOperatorIdAndStatus(operatorId, TripStatus.LOADING).size()
@@ -422,8 +539,11 @@ public class FleetService {
     private BoreResponse toBore(BoreLocation b) {
         return BoreResponse.builder()
                 .id(b.getId()).name(b.getName()).address(b.getAddress())
+                .mapsLink(b.getMapsLink())
                 .latitude(b.getLatitude()).longitude(b.getLongitude())
-                .primaryBore(b.isPrimaryBore()).build();
+                .primaryBore(b.isPrimaryBore())
+                .active(b.isActive())
+                .build();
     }
 
     private ExpenseResponse toExpense(Expense e) {

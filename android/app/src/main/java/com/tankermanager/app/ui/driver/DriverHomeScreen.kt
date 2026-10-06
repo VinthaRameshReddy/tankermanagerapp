@@ -81,11 +81,19 @@ fun DriverHomeScreen(repo: TankerRepository, onLogout: () -> Unit) {
     fun refresh() {
         scope.launch {
             repo.safe { driverActiveTrips() }
-                .onSuccess {
-                    trips = it
+                .onSuccess { list ->
+                    val ordered = list.sortedWith(
+                        compareBy(
+                            { if (it.status == "QUEUED") 1 else 0 },
+                            { it.queuePosition ?: 0 }
+                        )
+                    )
+                    trips = ordered
                     selected = when {
-                        selected == null -> it.firstOrNull()
-                        else -> it.find { t -> t.id == selected?.id } ?: it.firstOrNull()
+                        selected == null -> ordered.firstOrNull { it.status != "QUEUED" } ?: ordered.firstOrNull()
+                        else -> ordered.find { t -> t.id == selected?.id }
+                            ?: ordered.firstOrNull { it.status != "QUEUED" }
+                            ?: ordered.firstOrNull()
                     }
                 }
                 .onFailure { error = it.message }
@@ -102,14 +110,19 @@ fun DriverHomeScreen(repo: TankerRepository, onLogout: () -> Unit) {
         refresh()
     }
 
-    // Auto live sharing whenever there is an active trip — no manual toggle.
+    // Auto live sharing whenever there is an active (non-queued) trip — no manual toggle.
     LaunchedEffect(selected?.id, trips.map { it.id to it.status }) {
         val trip = selected ?: return@LaunchedEffect
-        if (trip.status in listOf("COMPLETED", "CANCELLED")) return@LaunchedEffect
+        if (trip.status in listOf("COMPLETED", "CANCELLED", "QUEUED")) {
+            if (trip.status == "QUEUED") {
+                liveHint = "Next in queue #${trip.queuePosition ?: "—"} — starts after current trip"
+            }
+            return@LaunchedEffect
+        }
         liveHint = "Sharing live location · status updates automatically"
         while (true) {
             val current = selected ?: break
-            if (current.status in listOf("COMPLETED", "CANCELLED")) break
+            if (current.status in listOf("COMPLETED", "CANCELLED", "QUEUED")) break
             val loc = currentLocation(context)
             if (loc != null) {
                 repo.safe {
@@ -192,11 +205,22 @@ fun DriverHomeScreen(repo: TankerRepository, onLogout: () -> Unit) {
                                 Column(modifier = Modifier.weight(1f)) {
                                     Text(trip.tripCode ?: "", fontWeight = FontWeight.Bold)
                                     Text("${trip.customerName}", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    if (trip.status == "QUEUED") {
+                                        Text(
+                                            "Queue #${trip.queuePosition ?: "—"}",
+                                            color = Sun,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
                                 }
                                 StatusPill(trip.status)
                             }
                             if (selectedCard) {
-                                Text("Current focus", color = LagoonDeep, fontWeight = FontWeight.SemiBold)
+                                Text(
+                                    if (trip.status == "QUEUED") "Waiting in queue" else "Current focus",
+                                    color = LagoonDeep,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
                         }
                     }

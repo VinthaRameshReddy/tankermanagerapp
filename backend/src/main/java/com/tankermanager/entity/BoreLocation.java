@@ -33,6 +33,10 @@ public class BoreLocation {
     @Column(nullable = false, length = 500)
     private String address;
 
+    /** Optional Google Maps share link used when creating/editing the bore. */
+    @Column(length = 1000)
+    private String mapsLink;
+
     @Column(nullable = false, precision = 10, scale = 7)
     private BigDecimal latitude;
 

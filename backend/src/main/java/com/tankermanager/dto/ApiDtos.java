@@ -90,11 +90,10 @@ public final class ApiDtos {
     public static class BoreRequest {
         @NotBlank
         private String name;
-        @NotBlank
         private String address;
-        @NotNull
+        /** Prefer paste Maps link — lat/lng filled automatically when present. */
+        private String mapsLink;
         private BigDecimal latitude;
-        @NotNull
         private BigDecimal longitude;
         private boolean primaryBore;
     }
@@ -105,9 +104,41 @@ public final class ApiDtos {
         private Long id;
         private String name;
         private String address;
+        private String mapsLink;
         private BigDecimal latitude;
         private BigDecimal longitude;
         private boolean primaryBore;
+        private boolean active;
+    }
+
+    @Data
+    public static class DriverStatusRequest {
+        @NotNull
+        private Boolean active;
+    }
+
+    @Data
+    public static class SwapTripRequest {
+        @NotNull
+        private Long otherTripId;
+    }
+
+    @Data
+    public static class DistancePreviewRequest {
+        private Long boreId;
+        private Long customerLocationId;
+        private BigDecimal dropLat;
+        private BigDecimal dropLng;
+        private String mapsLink;
+    }
+
+    @Data
+    @Builder
+    public static class DistancePreviewResponse {
+        private Long boreId;
+        private String boreName;
+        private Double distanceKm;
+        private Integer etaMinutes;
     }
 
     @Data
@@ -155,14 +186,17 @@ public final class ApiDtos {
         private Long id;
         private String tripCode;
         private TripStatus status;
+        private Integer queuePosition;
         private String customerName;
         private String customerPhone;
         private Long customerId;
         private Long customerLocationId;
+        private Long tankerId;
         private String tankerNumber;
         private Long driverId;
         private String driverName;
         private String driverPhone;
+        private Long boreId;
         private String boreName;
         private String dropAddress;
         private BigDecimal dropLat;
@@ -182,6 +216,7 @@ public final class ApiDtos {
         private Instant assignedAt;
         private Instant startedAt;
         private Instant completedAt;
+        private Instant createdAt;
         private String notes;
         private List<StatusHistoryItem> history;
     }

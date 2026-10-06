@@ -71,10 +71,12 @@ import com.tankermanager.app.util.MapsLinkResolver
 import com.tankermanager.app.data.model.CreateStaffRequest
 import com.tankermanager.app.data.model.CustomerResponse
 import com.tankermanager.app.data.model.DashboardResponse
+import com.tankermanager.app.data.model.DistancePreviewRequest
 import com.tankermanager.app.data.model.DriverResponse
 import com.tankermanager.app.data.model.ExpenseRequest
 import com.tankermanager.app.data.model.ExpenseResponse
 import com.tankermanager.app.data.model.SalaryRequest
+import com.tankermanager.app.data.model.SwapTripRequest
 import com.tankermanager.app.data.model.TankerRequest
 import com.tankermanager.app.data.model.TankerResponse
 import com.tankermanager.app.data.model.TripResponse
@@ -289,25 +291,85 @@ private fun TripsTab(
     onOpenTrack: (String) -> Unit
 ) {
     var trips by remember { mutableStateOf<List<TripResponse>>(emptyList()) }
+    var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
     var error by remember { mutableStateOf<String?>(null) }
     var filter by remember { mutableStateOf("ALL") }
+    var period by remember { mutableStateOf("ALL") }
+    var selectedTankerIds by remember { mutableStateOf<Set<Long>>(emptySet()) }
+    var swapFromId by remember { mutableStateOf<Long?>(null) }
+    val scope = rememberCoroutineScope()
+
+    fun reload() {
+        scope.launch {
+            val tankerCsv = selectedTankerIds.takeIf { it.isNotEmpty() }?.joinToString(",")
+            repo.safe { trips(period = period.takeIf { it != "ALL" }, tankerIds = tankerCsv) }
+                .onSuccess { trips = it }
+                .onFailure { error = it.message }
+        }
+    }
 
     LaunchedEffect(Unit) {
-        repo.safe { trips() }
-            .onSuccess { trips = it }
-            .onFailure { error = it.message }
+        repo.safe { tankers() }.onSuccess { tankers = it }
+        reload()
     }
+    LaunchedEffect(period, selectedTankerIds) { reload() }
 
     val filtered = when (filter) {
         "ACTIVE" -> trips.filter { it.status !in listOf("COMPLETED", "CANCELLED") }
+        "QUEUED" -> trips.filter { it.status == "QUEUED" }
         "DONE" -> trips.filter { it.status == "COMPLETED" }
         else -> trips
     }
 
-    ScreenScaffold(title = "Trips", subtitle = "Every delivery at a glance") {
+    ScreenScaffold(title = "Trips", subtitle = "Filter by day / week / month · queue & swap") {
         ErrorBanner(error)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            listOf("ALL" to "All", "ACTIVE" to "Live", "DONE" to "Done").forEach { (key, label) ->
+        Text("Time range", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("ALL" to "All", "DAY" to "Today", "WEEK" to "This week", "MONTH" to "This month")
+                .forEach { (key, label) ->
+                    FilterChip(selected = period == key, onClick = { period = key }, label = { Text(label) })
+                }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Text("Tankers", fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterChip(
+                selected = selectedTankerIds.isEmpty(),
+                onClick = { selectedTankerIds = emptySet() },
+                label = { Text("All tankers") }
+            )
+            tankers.forEach { t ->
+                FilterChip(
+                    selected = t.id in selectedTankerIds,
+                    onClick = {
+                        selectedTankerIds = if (t.id in selectedTankerIds) {
+                            selectedTankerIds - t.id
+                        } else {
+                            selectedTankerIds + t.id
+                        }
+                    },
+                    label = { Text(t.vehicleNumber) }
+                )
+            }
+        }
+        Spacer(modifier = Modifier.height(8.dp))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            listOf("ALL" to "All", "ACTIVE" to "Live", "QUEUED" to "Queued", "DONE" to "Done").forEach { (key, label) ->
                 FilterChip(
                     selected = filter == key,
                     onClick = { filter = key },
@@ -315,9 +377,17 @@ private fun TripsTab(
                 )
             }
         }
+        if (swapFromId != null) {
+            Text(
+                "Tap another queued/assigned trip on the same tanker to swap order.",
+                color = Coral,
+                style = MaterialTheme.typography.bodySmall
+            )
+            TextButton(onClick = { swapFromId = null }) { Text("Cancel swap") }
+        }
         Spacer(modifier = Modifier.height(12.dp))
         if (filtered.isEmpty()) {
-            EmptyState("No trips yet — tap + Trip to book")
+            EmptyState("No trips for this filter — tap + Trip to book")
         } else {
             LazyColumn(
                 modifier = Modifier.weight(1f),
@@ -326,9 +396,34 @@ private fun TripsTab(
             ) {
                 itemsIndexed(filtered, key = { _, t -> t.id }) { _, trip ->
                     AnimatedVisibility(visible = true, enter = fadeIn() + slideInVertically { it / 4 }) {
-                        TripCard(trip, onOpen = { onOpenTrip(trip.id) }, onTrack = {
-                            trip.trackingToken?.let(onOpenTrack)
-                        })
+                        TripCard(
+                            trip = trip,
+                            swapSelected = swapFromId == trip.id,
+                            onOpen = { onOpenTrip(trip.id) },
+                            onTrack = { trip.trackingToken?.let(onOpenTrack) },
+                            onSwap = {
+                                val from = swapFromId
+                                if (from == null) {
+                                    if (trip.status == "QUEUED" || trip.status == "ASSIGNED") {
+                                        swapFromId = trip.id
+                                    } else {
+                                        error = "Only queued or assigned trips can be swapped"
+                                    }
+                                } else if (from == trip.id) {
+                                    swapFromId = null
+                                } else {
+                                    scope.launch {
+                                        repo.safe { swapTrips(from, SwapTripRequest(trip.id)) }
+                                            .onSuccess {
+                                                swapFromId = null
+                                                error = null
+                                                reload()
+                                            }
+                                            .onFailure { error = it.message }
+                                    }
+                                }
+                            }
+                        )
                     }
                 }
             }
@@ -337,7 +432,13 @@ private fun TripsTab(
 }
 
 @Composable
-fun TripCard(trip: TripResponse, onOpen: () -> Unit, onTrack: () -> Unit) {
+fun TripCard(
+    trip: TripResponse,
+    onOpen: () -> Unit,
+    onTrack: () -> Unit,
+    onSwap: (() -> Unit)? = null,
+    swapSelected: Boolean = false
+) {
     GlassCard(onClick = onOpen) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
             Text(trip.tripCode ?: "Trip", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleMedium)
@@ -348,6 +449,13 @@ fun TripCard(trip: TripResponse, onOpen: () -> Unit, onTrack: () -> Unit) {
         Text(trip.customerPhone ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant)
         Spacer(modifier = Modifier.height(8.dp))
         Text("${trip.tankerNumber ?: "—"}  •  ${trip.driverName ?: "—"}")
+        if (trip.status == "QUEUED" && trip.queuePosition != null) {
+            Text(
+                "Queue #${trip.queuePosition} — starts after current trip",
+                color = Sun,
+                fontWeight = FontWeight.SemiBold
+            )
+        }
         Text(trip.dropAddress ?: "", color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
         if ((trip.tripAmount ?: 0.0) > 0 || (trip.amountDue ?: 0.0) > 0) {
             Text(
@@ -359,16 +467,24 @@ fun TripCard(trip: TripResponse, onOpen: () -> Unit, onTrack: () -> Unit) {
         if (trip.distanceKm != null || trip.etaMinutes != null) {
             Text(
                 listOfNotNull(
-                    trip.distanceKm?.let { "~$it km" },
-                    trip.etaMinutes?.let { "ETA ${it}m" }
+                    trip.distanceKm?.let { "~$it km to drop" },
+                    trip.etaMinutes?.let { "ETA ${it}m" },
+                    trip.boreName?.let { "via $it" }
                 ).joinToString(" • "),
                 color = Lagoon,
                 fontWeight = FontWeight.SemiBold
             )
         }
-        if (trip.trackingEnabled == true && !trip.trackingToken.isNullOrBlank()) {
-            TextButton(onClick = onTrack, contentPadding = PaddingValues(0.dp)) {
-                Text("Open live tracking")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (trip.trackingEnabled == true && !trip.trackingToken.isNullOrBlank()) {
+                TextButton(onClick = onTrack, contentPadding = PaddingValues(0.dp)) {
+                    Text("Open live tracking")
+                }
+            }
+            if (onSwap != null && (trip.status == "QUEUED" || trip.status == "ASSIGNED")) {
+                TextButton(onClick = onSwap, contentPadding = PaddingValues(0.dp)) {
+                    Text(if (swapSelected) "Selected — tap other trip" else "Swap order")
+                }
             }
         }
     }
@@ -391,30 +507,77 @@ private fun BookTripSheet(
     var tripFare by remember { mutableStateOf("") }
     var tankers by remember { mutableStateOf<List<TankerResponse>>(emptyList()) }
     var drivers by remember { mutableStateOf<List<DriverResponse>>(emptyList()) }
+    var bores by remember { mutableStateOf<List<BoreResponse>>(emptyList()) }
     var tankerId by remember { mutableStateOf<Long?>(null) }
     var driverId by remember { mutableStateOf<Long?>(null) }
+    var boreId by remember { mutableStateOf<Long?>(null) }
+    var distanceKm by remember { mutableStateOf<Double?>(null) }
+    var etaMinutes by remember { mutableStateOf<Int?>(null) }
     var loading by remember { mutableStateOf(false) }
     var error by remember { mutableStateOf<String?>(null) }
     var customerMenuOpen by remember { mutableStateOf(false) }
     var locationMenuOpen by remember { mutableStateOf(false) }
+    var boreMenuOpen by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     val context = androidx.compose.ui.platform.LocalContext.current
 
     val selectedCustomer = customers.firstOrNull { it.id == selectedCustomerId }
     val locations = selectedCustomer?.locations.orEmpty()
     val selectedLocation = locations.firstOrNull { it.id == selectedLocationId }
+    val selectedBore = bores.firstOrNull { it.id == boreId }
+
+    fun refreshDistance() {
+        scope.launch {
+            if (selectedLocationId == null && mapsLink.isBlank()) {
+                distanceKm = null
+                etaMinutes = null
+                return@launch
+            }
+            val (link, dropLat, dropLng) = MapsLinkResolver.resolveForApi(
+                context,
+                mapsLink.trim().ifBlank { null },
+                null,
+                null
+            )
+            repo.safe {
+                distancePreview(
+                    DistancePreviewRequest(
+                        boreId = boreId,
+                        customerLocationId = selectedLocationId,
+                        dropLat = dropLat,
+                        dropLng = dropLng,
+                        mapsLink = link ?: mapsLink.trim().ifBlank { null }
+                    )
+                )
+            }.onSuccess {
+                distanceKm = it.distanceKm
+                etaMinutes = it.etaMinutes
+                if (boreId == null) boreId = it.boreId
+            }.onFailure {
+                distanceKm = null
+                etaMinutes = null
+            }
+        }
+    }
 
     LaunchedEffect(selectedLocationId) {
         selectedLocation?.tripRate?.let { tripFare = "%.0f".format(it) }
+        refreshDistance()
     }
+    LaunchedEffect(boreId, mapsLink) { refreshDistance() }
 
     LaunchedEffect(Unit) {
         repo.safe { customers() }.onSuccess { customers = it }
         repo.safe { tankers() }.onSuccess { tankers = it }
-        repo.safe { drivers() }.onSuccess { drivers = it }
-            .onFailure {
-                error = it.message ?: "Could not load drivers"
-            }
+        repo.safe { drivers() }.onSuccess { list ->
+            drivers = list.filter { it.active != false }
+        }.onFailure {
+            error = it.message ?: "Could not load drivers"
+        }
+        repo.safe { bores() }.onSuccess { list ->
+            bores = list
+            boreId = list.firstOrNull { it.primaryBore == true }?.id ?: list.firstOrNull()?.id
+        }
     }
 
     Box(
@@ -438,7 +601,7 @@ private fun BookTripSheet(
             ) {
                 Text("Book a trip", style = MaterialTheme.typography.headlineMedium)
                 Text(
-                    "Select customer → pick their saved location from the dropdown. Driver gets Navigate.",
+                    "Pick customer, bore & location. Busy tankers get the trip in queue (one-by-one).",
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 ErrorBanner(error)
@@ -548,6 +711,62 @@ private fun BookTripSheet(
                     color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
 
+                Text("Bore location", fontWeight = FontWeight.SemiBold)
+                if (bores.isEmpty()) {
+                    Text(
+                        "No bores yet — add one in Fleet → Bore.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                } else {
+                    ExposedDropdownMenuBox(
+                        expanded = boreMenuOpen,
+                        onExpandedChange = { boreMenuOpen = it }
+                    ) {
+                        OutlinedTextField(
+                            value = selectedBore?.let {
+                                (it.name ?: "Bore") + if (it.primaryBore == true) " (Primary)" else ""
+                            } ?: "Select bore",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = boreMenuOpen) },
+                            modifier = Modifier
+                                .menuAnchor(MenuAnchorType.PrimaryNotEditable)
+                                .fillMaxWidth()
+                        )
+                        ExposedDropdownMenu(
+                            expanded = boreMenuOpen,
+                            onDismissRequest = { boreMenuOpen = false }
+                        ) {
+                            bores.forEach { b ->
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            (b.name ?: "Bore") +
+                                                if (b.primaryBore == true) " · Primary" else ""
+                                        )
+                                    },
+                                    onClick = {
+                                        boreId = b.id
+                                        boreMenuOpen = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                if (distanceKm != null || etaMinutes != null) {
+                    Text(
+                        listOfNotNull(
+                            distanceKm?.let { "Distance bore → customer: ~$it km" },
+                            etaMinutes?.let { "ETA ~${it} min" }
+                        ).joinToString(" · "),
+                        color = Lagoon,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+
                 Text("Select tanker", fontWeight = FontWeight.SemiBold)
                 if (tankers.isEmpty()) {
                     Text(
@@ -559,11 +778,11 @@ private fun BookTripSheet(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         tankers.forEach { t ->
                             val busy = t.status != null && t.status != "AVAILABLE"
-                            val statusLabel = if (busy) "On trip" else "Available"
+                            val statusLabel = if (busy) "On trip → will queue" else "Available now"
                             FilterChip(
                                 selected = tankerId == t.id,
-                                onClick = { if (!busy) tankerId = t.id },
-                                enabled = !busy,
+                                onClick = { tankerId = t.id },
+                                enabled = t.status != "MAINTENANCE" && t.status != "INACTIVE",
                                 label = {
                                     Text("${t.vehicleNumber} · $statusLabel")
                                 },
@@ -572,10 +791,10 @@ private fun BookTripSheet(
                         }
                     }
                 }
-                Text("Select driver", fontWeight = FontWeight.SemiBold)
+                Text("Select driver (active only)", fontWeight = FontWeight.SemiBold)
                 if (drivers.isEmpty()) {
                     Text(
-                        "No drivers yet — owner adds drivers in Fleet.",
+                        "No active drivers — owner adds drivers in Fleet.",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -583,11 +802,10 @@ private fun BookTripSheet(
                     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         drivers.forEach { d ->
                             val busy = d.available == false
-                            val statusLabel = if (busy) "On trip" else "Available"
+                            val statusLabel = if (busy) "On trip (OK for queue)" else "Available"
                             FilterChip(
                                 selected = driverId == d.id,
-                                onClick = { if (!busy) driverId = d.id },
-                                enabled = !busy,
+                                onClick = { driverId = d.id },
                                 label = {
                                     Text("${d.fullName ?: d.phone ?: "Driver"} · $statusLabel")
                                 },
@@ -632,6 +850,7 @@ private fun BookTripSheet(
                                     customerName = name.trim().ifBlank { null },
                                     tankerId = tid,
                                     driverId = did,
+                                    boreId = boreId,
                                     customerLocationId = selectedLocationId,
                                     dropAddress = address.trim().ifBlank { null },
                                     dropLat = dropLat,
@@ -642,8 +861,12 @@ private fun BookTripSheet(
                             )
                         }
                         loading = false
-                        result.onSuccess { onBooked(it.id) }
-                            .onFailure { error = it.message }
+                        result.onSuccess { booked ->
+                            if (booked.status == "QUEUED") {
+                                error = "Queued at #${booked.queuePosition} — starts after current trip"
+                            }
+                            onBooked(booked.id)
+                        }.onFailure { error = it.message }
                     }
                 })
                 TextButton(onClick = onDismiss, modifier = Modifier.align(Alignment.CenterHorizontally)) {

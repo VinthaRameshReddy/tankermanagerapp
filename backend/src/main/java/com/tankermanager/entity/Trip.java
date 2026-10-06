@@ -59,6 +59,11 @@ public class Trip {
     @Builder.Default
     private TripStatus status = TripStatus.ASSIGNED;
 
+    /**
+     * Position in this tanker's queue (1 = next up). Null when not queued.
+     */
+    private Integer queuePosition;
+
     @Column(nullable = false, length = 500)
     private String dropAddress;
 

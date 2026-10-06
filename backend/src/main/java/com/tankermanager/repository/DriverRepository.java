@@ -13,6 +13,9 @@ public interface DriverRepository extends JpaRepository<Driver, Long> {
     @Query("SELECT d FROM Driver d JOIN FETCH d.user WHERE d.operator.id = :operatorId AND d.active = true")
     List<Driver> findByOperatorIdAndActiveTrue(@Param("operatorId") Long operatorId);
 
+    @Query("SELECT d FROM Driver d JOIN FETCH d.user WHERE d.operator.id = :operatorId ORDER BY d.active DESC, d.user.fullName ASC")
+    List<Driver> findByOperatorId(@Param("operatorId") Long operatorId);
+
     @Query("SELECT d FROM Driver d JOIN FETCH d.user WHERE d.operator.id = :operatorId AND d.available = true AND d.active = true")
     List<Driver> findByOperatorIdAndAvailableTrueAndActiveTrue(@Param("operatorId") Long operatorId);
 
